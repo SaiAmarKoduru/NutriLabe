@@ -1,5 +1,6 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
   "/page": "app/page.js",
-  "/generator/page": "app/generator/page.js"
+  "/generator/page": "app/generator/page.js",
+  "/ingredient-builder/page": "app/ingredient-builder/page.js"
 }

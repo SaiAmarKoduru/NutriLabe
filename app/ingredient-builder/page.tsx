@@ -5,27 +5,20 @@
  * Ingredient Builder Page
  * ============================================================
  *
- * Two-step wizard that allows users to:
+ * Two-step wizard:
  *   Step 1 — Search USDA database, add ingredients with quantities
- *   Step 2 — Review total nutrition and preview the generated label
+ *   Step 2 — Review per-serving nutrition and preview the label
  *
  * FIXED (1.1): Per-serving nutrition calculation
- *   Previously: totalNutrition held the sum of ALL ingredient nutrition
- *               regardless of serving size, so the label was always wrong.
- *   Now:        totalNutrition is correctly scaled to reflect ONE serving.
- *
- * Calculation logic:
- *   1. Sum raw nutrition across all ingredients (total recipe nutrition)
- *   2. Calculate total recipe weight in grams
- *   3. Derive nutrition per gram = total nutrition / total weight
- *   4. Multiply by serving size in grams = per-serving nutrition
- *
- * If servingSize is 0 or not set, we fall back to showing total recipe
- * nutrition and display a warning to the user.
+ * ADDED (1.4): Toast notifications for ingredient actions
+ *   - Ingredient removed → info toast
+ *   - All ingredients cleared → warning toast
+ *   - Quantity edit confirmed → success toast
  * ============================================================
  */
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,13 +31,13 @@ import { RecipeIngredient } from '../types/recipe';
 import { NutritionData } from '../types/nutrition';
 
 // ─────────────────────────────────────────────
-// Types
+// Constants
 // ─────────────────────────────────────────────
 
 /**
- * The nutrient keys that we sum across ingredients.
+ * Nutrient keys we sum and display.
  * Excludes servingSize and servingsPerContainer which are
- * recipe-level metadata, not per-ingredient nutrients.
+ * recipe-level metadata, not per-ingredient nutrient values.
  */
 const NUTRIENT_KEYS: (keyof Omit<NutritionData, 'servingSize' | 'servingsPerContainer'>)[] = [
   'calories',
@@ -70,110 +63,69 @@ const NUTRIENT_KEYS: (keyof Omit<NutritionData, 'servingSize' | 'servingsPerCont
 /**
  * calculatePerServingNutrition
  *
- * Converts raw ingredient list into accurate per-serving NutritionData.
+ * Converts the ingredient list into accurate per-serving NutritionData.
  *
  * Algorithm:
- *   1. For each ingredient, compute its total nutrition contribution
- *      based on the quantity + unit the user entered.
- *   2. Sum all contributions → total recipe nutrition.
- *   3. Sum all ingredient weights in grams → total recipe weight.
- *   4. Compute nutrition per gram = total nutrition / total recipe weight.
- *   5. Multiply by servingSize → per-serving nutrition.
+ *   1. Sum each ingredient's nutrition contribution (scaled by quantity)
+ *   2. Sum total recipe weight in grams
+ *   3. Scale total nutrition to one serving:
+ *      perServing = (totalNutrition / totalWeight) × servingSize
  *
- * Edge cases handled:
- *   - servingSize = 0 → returns total recipe nutrition with a warning flag
- *   - totalWeight = 0 → returns zero nutrition (no ingredients)
- *   - Missing nutrient values → treated as 0
- *
- * @param ingredients    - List of recipe ingredients with quantities
- * @param servingSize    - Serving size in grams
- * @param servingsPerContainer - Number of servings in the full recipe
- * @returns NutritionData representing ONE serving
+ * Edge cases:
+ *   - No ingredients → returns zero nutrition
+ *   - Total weight = 0 → returns zero nutrition
+ *   - servingSize = 0 → returns total recipe nutrition with warning flag
  */
 function calculatePerServingNutrition(
   ingredients: RecipeIngredient[],
   servingSize: number,
   servingsPerContainer: number
 ): NutritionData {
-  // Base template with all zeros
-  const zeroNutrition: NutritionData = {
-    calories: 0,
-    totalFat: 0,
-    saturatedFat: 0,
-    transFat: 0,
-    cholesterol: 0,
-    sodium: 0,
-    totalCarbohydrates: 0,
-    dietaryFiber: 0,
-    sugars: 0,
-    protein: 0,
-    vitaminD: 0,
-    calcium: 0,
-    iron: 0,
-    potassium: 0,
+  const zero: NutritionData = {
+    calories: 0, totalFat: 0, saturatedFat: 0, transFat: 0,
+    cholesterol: 0, sodium: 0, totalCarbohydrates: 0, dietaryFiber: 0,
+    sugars: 0, protein: 0, vitaminD: 0, calcium: 0, iron: 0, potassium: 0,
     servingSize,
     servingsPerContainer,
   };
 
-  // Guard: no ingredients
-  if (ingredients.length === 0) {
-    return zeroNutrition;
-  }
+  if (ingredients.length === 0) return zero;
 
-  // ── Step 1 & 2: Sum all ingredient nutrition + total weight ──────────
+  // Step 1 & 2 — accumulate totals
   let totalWeightGrams = 0;
-  const totalNutrition = { ...zeroNutrition };
+  const totals = { ...zero };
 
   for (const ingredient of ingredients) {
-    // Convert ingredient quantity to grams for weight tracking
     const weightGrams = convertToGrams(ingredient.quantity, ingredient.unit);
     totalWeightGrams += weightGrams;
 
-    // Get this ingredient's nutrition contribution for the given quantity
     const contribution = calculateIngredientNutrition(
       ingredient.nutritionPer100g,
       ingredient.quantity,
       ingredient.unit
     );
 
-    // Accumulate each nutrient
     for (const key of NUTRIENT_KEYS) {
-      totalNutrition[key] += (contribution[key] ?? 0);
+      totals[key] += (contribution[key] ?? 0);
     }
   }
 
-  // Guard: total weight is zero (all quantities were 0)
-  if (totalWeightGrams === 0) {
-    return zeroNutrition;
-  }
+  if (totalWeightGrams === 0) return zero;
 
-  // Guard: servingSize not set — fall back to total recipe nutrition
-  // This prevents division by zero and still shows useful data
+  // Fall back to total recipe nutrition if serving size not set
   if (!servingSize || servingSize <= 0) {
-    return {
-      ...totalNutrition,
-      servingSize: 0,
-      servingsPerContainer,
-    };
+    return { ...totals, servingSize: 0, servingsPerContainer };
   }
 
-  // ── Step 3 & 4: Scale to per-serving ────────────────────────────────
-  // nutritionPerGram = totalNutrition / totalWeightGrams
-  // perServingNutrition = nutritionPerGram * servingSize
+  // Step 3 — scale to one serving
   const scaleFactor = servingSize / totalWeightGrams;
-
-  const perServingNutrition: NutritionData = {
-    ...zeroNutrition,
-    servingSize,
-    servingsPerContainer,
-  };
+  const perServing = { ...zero };
 
   for (const key of NUTRIENT_KEYS) {
-    // Round to 2 decimal places to avoid floating point noise
-    perServingNutrition[key] = Math.round(totalNutrition[key] * scaleFactor * 100) / 100;
+    perServing[key] = Math.round(totals[key] * scaleFactor * 100) / 100;
   }
 
-  return perServingNutrition;
+  return perServing;
 }
 
 // ─────────────────────────────────────────────
@@ -181,7 +133,7 @@ function calculatePerServingNutrition(
 // ─────────────────────────────────────────────
 
 export default function IngredientBuilder() {
-  // ── Recipe State ─────────────────────────────────────────────────────
+  // ── Recipe State ──────────────────────────────────────────────────────
   const [recipe, setRecipe] = useState({
     name: '',
     servingSize: 0,
@@ -192,24 +144,14 @@ export default function IngredientBuilder() {
   // ── Wizard State ──────────────────────────────────────────────────────
   const [activeStep, setActiveStep] = useState(1);
 
-  /**
-   * Inline editing state for ingredient quantities.
-   * Key: ingredient index, Value: { quantity, unit } being edited.
-   */
+  // ── Inline Edit State ─────────────────────────────────────────────────
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<{ quantity: number; unit: string }>({
     quantity: 0,
     unit: 'g',
   });
 
-  // ── Derived Per-Serving Nutrition ─────────────────────────────────────
-  /**
-   * This is computed on every render from the current ingredients + serving size.
-   * No need to store it in state since it is always derived from those two values.
-   *
-   * This was the core bug: previously this was stored in state and accumulated
-   * incorrectly. Now it is always a pure function of the current recipe.
-   */
+  // ── Derived Nutrition (never stored, always computed) ─────────────────
   const perServingNutrition = calculatePerServingNutrition(
     recipe.ingredients,
     recipe.servingSize,
@@ -238,8 +180,8 @@ export default function IngredientBuilder() {
   // ── Handlers ──────────────────────────────────────────────────────────
 
   /**
-   * Adds a new ingredient to the recipe.
-   * The nutrition calculation is always re-derived, never accumulated in state.
+   * Adds a new ingredient.
+   * Toast is handled inside USDAIngredientSearch on successful add.
    */
   const handleAddIngredient = (ingredient: RecipeIngredient) => {
     setRecipe((prev) => ({
@@ -250,20 +192,36 @@ export default function IngredientBuilder() {
 
   /**
    * Removes an ingredient by index.
+   * Shows an info toast confirming which ingredient was removed.
    */
   const handleRemoveIngredient = (index: number) => {
+    const name = recipe.ingredients[index]?.name ?? 'Ingredient';
+
     setRecipe((prev) => ({
       ...prev,
       ingredients: prev.ingredients.filter((_, i) => i !== index),
     }));
-    // Clear edit state if we removed the ingredient being edited
-    if (editingIndex === index) {
-      setEditingIndex(null);
-    }
+
+    if (editingIndex === index) setEditingIndex(null);
+
+    // Short name to keep toast concise
+    const shortName = name.length > 30 ? name.slice(0, 30) + '…' : name;
+    toast.info(`Removed ${shortName}`);
   };
 
   /**
-   * Begins inline editing for a specific ingredient.
+   * Clears all ingredients.
+   * Shows a warning toast since this is a destructive action.
+   */
+  const handleClearAll = () => {
+    const count = recipe.ingredients.length;
+    setRecipe((prev) => ({ ...prev, ingredients: [] }));
+    setEditingIndex(null);
+    toast.warning(`Cleared all ${count} ingredient${count !== 1 ? 's' : ''}`);
+  };
+
+  /**
+   * Begins inline editing for a specific ingredient row.
    */
   const handleStartEdit = (index: number) => {
     const ingredient = recipe.ingredients[index];
@@ -272,11 +230,17 @@ export default function IngredientBuilder() {
   };
 
   /**
-   * Commits the edited quantity/unit back to the ingredient.
+   * Commits the edited quantity back to the ingredient list.
+   * Shows a success toast confirming the update.
    */
   const handleConfirmEdit = () => {
     if (editingIndex === null) return;
-    if (editValues.quantity <= 0) return;
+    if (editValues.quantity <= 0) {
+      toast.error('Quantity must be greater than 0.');
+      return;
+    }
+
+    const name = recipe.ingredients[editingIndex]?.name ?? 'Ingredient';
 
     setRecipe((prev) => ({
       ...prev,
@@ -286,7 +250,9 @@ export default function IngredientBuilder() {
           : ing
       ),
     }));
+
     setEditingIndex(null);
+    toast.success(`Updated: ${editValues.quantity}${editValues.unit} of ${name.slice(0, 25)}`);
   };
 
   /**
@@ -296,19 +262,6 @@ export default function IngredientBuilder() {
     setEditingIndex(null);
   };
 
-  /**
-   * Updates serving size and keeps servingsPerContainer in sync.
-   */
-  const handleServingSizeChange = (value: string) => {
-    const parsed = parseFloat(value) || 0;
-    setRecipe((prev) => ({ ...prev, servingSize: parsed }));
-  };
-
-  const handleServingsPerContainerChange = (value: string) => {
-    const parsed = parseFloat(value) || 1;
-    setRecipe((prev) => ({ ...prev, servingsPerContainer: parsed }));
-  };
-
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
@@ -316,15 +269,11 @@ export default function IngredientBuilder() {
 
       {/* ── Page Header ───────────────────────────────────────────────── */}
       <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold">Ingredient Nutrition Builder</h1>
-            <p className="text-gray-600">Create nutrition labels from your ingredients</p>
-          </div>
-        </div>
+        <h1 className="text-3xl font-bold">Ingredient Nutrition Builder</h1>
+        <p className="text-gray-600">Create nutrition labels from your ingredients</p>
 
-        {/* ── Progress Steps ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
+        {/* Progress Steps */}
+        <div className="grid grid-cols-2 gap-4 mt-6">
           {steps.map((step) => (
             <button
               key={step.number}
@@ -370,7 +319,6 @@ export default function IngredientBuilder() {
             <Card className="p-6">
               <div className="space-y-4">
 
-                {/* Product Name */}
                 <div>
                   <Label htmlFor="name">Product Name</Label>
                   <Input
@@ -383,42 +331,42 @@ export default function IngredientBuilder() {
                   />
                 </div>
 
-                {/* Serving Info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="servingSize">
-                      Serving Size (g)
-                    </Label>
+                    <Label htmlFor="servingSize">Serving Size (g)</Label>
                     <Input
                       id="servingSize"
                       type="number"
                       min="1"
                       value={recipe.servingSize || ''}
-                      onChange={(e) => handleServingSizeChange(e.target.value)}
+                      onChange={(e) =>
+                        setRecipe((prev) => ({
+                          ...prev,
+                          servingSize: parseFloat(e.target.value) || 0,
+                        }))
+                      }
                       placeholder="e.g. 30"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="servingsPerContainer">
-                      Servings Per Container
-                    </Label>
+                    <Label htmlFor="servingsPerContainer">Servings Per Container</Label>
                     <Input
                       id="servingsPerContainer"
                       type="number"
                       min="1"
                       value={recipe.servingsPerContainer || ''}
-                      onChange={(e) => handleServingsPerContainerChange(e.target.value)}
+                      onChange={(e) =>
+                        setRecipe((prev) => ({
+                          ...prev,
+                          servingsPerContainer: parseFloat(e.target.value) || 1,
+                        }))
+                      }
                       placeholder="e.g. 8"
                     />
                   </div>
                 </div>
 
-                {/*
-                  Serving size warning.
-                  If the user has added ingredients but not set a serving size,
-                  the label would show total recipe nutrition which is misleading.
-                  We show a gentle warning to guide them.
-                */}
+                {/* Serving size warning */}
                 {recipe.ingredients.length > 0 && recipe.servingSize <= 0 && (
                   <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                     ⚠ Please enter a serving size so the label shows per-serving values.
@@ -426,7 +374,6 @@ export default function IngredientBuilder() {
                 )}
               </div>
 
-              {/* USDA Ingredient Search */}
               <div className="mt-6">
                 <USDAIngredientSearch onIngredientAdd={handleAddIngredient} />
               </div>
@@ -447,15 +394,13 @@ export default function IngredientBuilder() {
                     )}
                   </h3>
 
-                  {/* Clear all button */}
+                  {/* Clear all — only visible when ingredients exist */}
                   {recipe.ingredients.length > 0 && (
                     <Button
                       variant="ghost"
                       size="sm"
                       className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                      onClick={() =>
-                        setRecipe((prev) => ({ ...prev, ingredients: [] }))
-                      }
+                      onClick={handleClearAll}
                     >
                       Clear All
                     </Button>
@@ -475,9 +420,11 @@ export default function IngredientBuilder() {
                         className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{ingredient.name}</div>
+                          <div className="font-medium truncate text-sm">
+                            {ingredient.name}
+                          </div>
 
-                          {/* ── Inline Edit Mode ───────────────────────── */}
+                          {/* Inline edit mode */}
                           {editingIndex === index ? (
                             <div className="flex items-center gap-2 mt-1">
                               <Input
@@ -499,7 +446,7 @@ export default function IngredientBuilder() {
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="h-7 w-7 text-green-600"
+                                className="h-7 w-7 text-green-600 hover:bg-green-50"
                                 onClick={handleConfirmEdit}
                               >
                                 <Check className="w-3 h-3" />
@@ -507,21 +454,20 @@ export default function IngredientBuilder() {
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="h-7 w-7 text-gray-400"
+                                className="h-7 w-7 text-gray-400 hover:bg-gray-100"
                                 onClick={handleCancelEdit}
                               >
                                 <X className="w-3 h-3" />
                               </Button>
                             </div>
                           ) : (
-                            /* ── Display Mode ─────────────────────────── */
                             <div className="text-sm text-gray-500">
                               {ingredient.quantity} {ingredient.unit}
                             </div>
                           )}
                         </div>
 
-                        {/* Action buttons (only show when not editing this row) */}
+                        {/* Edit + Remove buttons */}
                         {editingIndex !== index && (
                           <div className="flex items-center gap-1 ml-2">
                             <Button
@@ -549,7 +495,7 @@ export default function IngredientBuilder() {
               </div>
             </Card>
 
-            {/* Proceed to Step 2 */}
+            {/* Proceed button — only shown when all required fields are filled */}
             {recipe.ingredients.length > 0 &&
               recipe.name &&
               recipe.servingSize > 0 &&
@@ -576,12 +522,10 @@ export default function IngredientBuilder() {
           {/* ── Left: Recipe Summary ───────────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold">Recipe Summary</h2>
-              </div>
+              <h2 className="text-xl font-semibold mb-4">Recipe Summary</h2>
 
               <div className="space-y-4">
-                {/* Recipe metadata */}
+                {/* Metadata */}
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <div className="grid grid-cols-2 gap-y-2 text-sm">
                     <div className="text-gray-500">Product Name</div>
@@ -595,11 +539,7 @@ export default function IngredientBuilder() {
                   </div>
                 </div>
 
-                {/*
-                  Per-serving nutrition grid.
-                  These values now correctly reflect ONE serving, not the entire recipe.
-                  Labels clearly state "Per Serving" to make this explicit.
-                */}
+                {/* Per-serving nutrient grid */}
                 <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                   Nutrition Per Serving ({recipe.servingSize}g)
                 </h3>
@@ -611,7 +551,6 @@ export default function IngredientBuilder() {
                       </div>
                       <div className="font-medium text-sm">
                         {perServingNutrition[key].toFixed(1)}
-                        {/* Show appropriate unit per nutrient */}
                         {key === 'calories'
                           ? ' kcal'
                           : ['sodium', 'cholesterol', 'calcium', 'iron', 'potassium', 'vitaminD'].includes(key)
@@ -636,13 +575,7 @@ export default function IngredientBuilder() {
           {/* ── Right: Label Preview ───────────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <h2 className="text-xl font-semibold">Nutrition Label Preview</h2>
-              </div>
-              {/*
-                We pass perServingNutrition — the correctly scaled per-serving values.
-                Previously, totalNutrition (entire recipe) was passed here, which was wrong.
-              */}
+              <h2 className="text-xl font-semibold mb-4">Nutrition Label Preview</h2>
               <LabelPreview
                 nutritionData={perServingNutrition}
                 compact

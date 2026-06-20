@@ -1,3 +1,22 @@
+/**
+ * ============================================================
+ * Root Layout
+ * ============================================================
+ *
+ * Next.js App Router root layout — wraps every page in the app.
+ *
+ * ADDED (1.4):
+ *   <Toaster /> from sonner mounted here once at the root level.
+ *   This makes toast notifications available on every page without
+ *   needing to mount the provider per-page.
+ *
+ *   Configuration:
+ *   - position: "bottom-right" — unobtrusive, standard for web apps
+ *   - richColors: true — uses semantic colors (green=success, red=error)
+ *   - duration: 3000ms — long enough to read, short enough not to annoy
+ * ============================================================
+ */
+
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -6,25 +25,22 @@ import { Footer } from "./components/footer";
 import GoogleAnalytics from "./components/google-analytics";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
+import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-
   title: {
     default: 'Minor Project | Create Ingredient Based Nutrition Labels',
     template: '%s | Ingredient Based Nutrition Label Generator'
   },
-
   description: 'Create FDA-compliant nutrition labels. Perfect for food manufacturers, small businesses & nutritionists. Supports US, EU, Indian, Australian & Canadian standards.',
-
   openGraph: {
     type: 'website',
     siteName: 'Ingredient Based Nutrition Label Generator',
     title: 'Nutrition Label Generator | Create Nutrition Labels Instantly',
     description: 'Create FDA-compliant nutrition labels. Perfect for food manufacturers, small businesses & nutritionists.',
     locale: 'en_US',
-  
     images: [
       {
         url: '/og-image.jpg',
@@ -34,7 +50,6 @@ export const metadata: Metadata = {
       },
     ],
   },
-
   keywords: [
     'free nutrition label maker',
     'FDA nutrition label generator',
@@ -47,21 +62,17 @@ export const metadata: Metadata = {
     'food manufacturer tools',
     'small business label maker'
   ],
-
   authors: [{ name: 'Sai Amar' }],
   creator: 'Sai Amar',
   publisher: 'Sai Amar',
-
   formatDetection: {
     email: false,
     address: false,
     telephone: false,
   },
-
   verification: {
     google: '7nItEeuNSAIFL_unU4Ai5p-SGizDDaJU8XRYEKdtOgk',
   },
-
   robots: {
     index: true,
     follow: true,
@@ -73,10 +84,8 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-
-
   manifest: '/site.webmanifest'
-}
+};
 
 export default function RootLayout({
   children,
@@ -111,8 +120,20 @@ export default function RootLayout({
             <Footer />
           </div>
         </Suspense>
+
+        {/*
+          Global toast notification provider.
+          Mounted outside Suspense so toasts work even during
+          suspense boundaries resolving.
+          richColors maps: success→green, error→red, info→blue, warning→amber
+        */}
+        <Toaster
+          position="bottom-right"
+          richColors
+          duration={3000}
+          closeButton
+        />
       </body>
     </html>
   );
 }
-
