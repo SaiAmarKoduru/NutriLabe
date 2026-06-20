@@ -11,16 +11,6 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/ingredient-builder/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ingredient-builder/page.js"
-    ],
-    "/ingredient-builder/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ingredient-builder/layout.js"
-    ],
     "/generator/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",

@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 const nutritionSchema = z.object({
-  servingSize: z.number().min(1, "Required"),
-  servingsPerContainer: z.number().min(1, "Required"),
+  servingSize: z.coerce.number().min(1, "Required"),
+  servingsPerContainer: z.coerce.number().min(1, "Required"),
   calories: z.number().min(0),
   totalFat: z.number().min(0),
   saturatedFat: z.number().min(0),
@@ -104,7 +104,7 @@ export function NutritionForm({ onSubmit }: NutritionFormProps) {
           <FormLabel className="text-sm">{field.label}</FormLabel>
           <FormControl>
             <Input
-              type={field.name === "servingSize" || field.name === "servingsPerContainer" ? "text" : "number"}
+              type="number"
               min="0"
               step="0.1"
               {...formField}
