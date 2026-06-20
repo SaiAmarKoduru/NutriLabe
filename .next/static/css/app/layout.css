@@ -1048,6 +1048,9 @@ video {
 .whitespace-nowrap {
   white-space: nowrap;
 }
+.rounded {
+  border-radius: 0.25rem;
+}
 .rounded-2xl {
   border-radius: 1rem;
 }
