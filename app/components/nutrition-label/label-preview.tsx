@@ -6,21 +6,28 @@
  * Renders the selected nutrition label format with:
  *   - Format selector dropdown (US, EU, Indian, Canada, Australia)
  *   - Download button (exports label as high-res PNG)
+ *   - Zoom button (opens label in fullscreen modal) ← ADDED 1.6
  *   - Optional label information panel
  *
- * ADDED (1.4): Toast notifications for download lifecycle
- *   - Loading toast while html-to-image is processing
- *   - Success toast when PNG download completes
- *   - Error toast if download fails (e.g. label element not found)
+ * ADDED (1.6): Label Zoom / Preview Modal
+ *   Strategy: Option A — two separate renders of the label component.
+ *     - Card render: small preview, holds id="nutrition-label" for download
+ *     - Modal render: full-size display, no id, read-only
+ *   Both renders share the same `format` state so switching format
+ *   inside the modal also updates the card preview and vice versa.
  *
- * ADDED (1.4): Download button shows spinner + "Generating…" text
- *   during image capture so users know the app is working.
+ *   New state added: isModalOpen (boolean) — nothing else changed.
  *
- * Existing functionality fully preserved:
+ * PRESERVED (1.4):
+ *   - Toast notifications for download lifecycle
+ *   - Loading spinner on Download button
+ *
+ * PRESERVED (all):
+ *   - id="nutrition-label" stays on card element only
  *   - All 5 label formats
- *   - Format switching
- *   - 300 DPI export with 3× scale factor
+ *   - 300 DPI download export
  *   - Label info panel
+ *   - onFormatChange callback
  * ============================================================
  */
 
@@ -34,9 +41,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ChevronDown, Download, Globe, Loader2 } from 'lucide-react';
+import {
+  ChevronDown,
+  Download,
+  Globe,
+  Loader2,
+  ZoomIn,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import * as Dialog from '@radix-ui/react-dialog';
 import { USNutritionLabel } from '../us-nutrition-label';
 import { EUNutritionLabel } from '../eu-nutrition-label';
 import { IndianNutritionalLabel } from '../IndianNutritionalLabel';
@@ -66,8 +81,9 @@ interface LabelPreviewProps {
 // ─────────────────────────────────────────────
 
 /**
- * Maps each LabelFormat key to its corresponding React component.
- * Add new country formats here — the dropdown auto-populates from this map.
+ * Maps each LabelFormat key to its React component.
+ * Both the card preview and the modal render pull from this map.
+ * Add new country formats here — dropdown auto-populates.
  */
 const labelComponents: Record<LabelFormat, React.ComponentType<{ data: any }>> = {
   US: USNutritionLabel,
@@ -89,12 +105,29 @@ const LabelPreview = ({
   defaultFormat = 'US',
   onFormatChange,
 }: LabelPreviewProps) => {
+
+  // ── State ─────────────────────────────────────────────────────────────
+
+  /** Currently selected label format — shared between card and modal */
   const [format, setFormat] = useState<LabelFormat>(defaultFormat);
+
+  /** Controls PNG generation loading state on the Download button */
   const [isDownloading, setIsDownloading] = useState(false);
 
   /**
+   * Controls modal open/close.
+   * ADDED (1.6): Only new state introduced in this feature.
+   */
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+
+  /**
    * handleFormatChange
-   * Updates local format state and notifies parent if callback provided.
+   *
+   * Updates format state and notifies parent if callback provided.
+   * Because both card and modal read the same `format` state,
+   * changing format in either location updates both simultaneously.
    */
   const handleFormatChange = (newFormat: LabelFormat) => {
     setFormat(newFormat);
@@ -104,16 +137,15 @@ const LabelPreview = ({
   /**
    * downloadLabel
    *
-   * Captures the #nutrition-label DOM element as a high-resolution PNG
-   * and triggers a browser download.
+   * Captures the #nutrition-label DOM element (card render only —
+   * the modal render has no id) as a high-resolution PNG and
+   * triggers a browser download.
    *
-   * Resolution: 300 DPI achieved by scaling the element 3× (96 DPI × 3 = 288 DPI ≈ 300 DPI)
+   * Resolution: 300 DPI via 3× scale factor (96 DPI × 3 ≈ 288 DPI)
    *
-   * ADDED (1.4):
-   *   - Loading toast shown immediately when download starts
-   *   - Success toast with filename when download completes
-   *   - Error toast if anything fails (element missing, canvas error, etc.)
-   *   - Button shows spinner + disabled state during generation
+   * IMPORTANT: This always targets id="nutrition-label" which lives
+   * on the card element. The modal element has no id so it is never
+   * accidentally captured regardless of modal open/close state.
    */
   const downloadLabel = async () => {
     const element = document.getElementById('nutrition-label');
@@ -126,13 +158,10 @@ const LabelPreview = ({
     if (isDownloading) return;
 
     setIsDownloading(true);
-
-    // Show loading toast — persists until we dismiss it
     const loadingToastId = toast.loading('Generating high-resolution label…');
 
     try {
-      const desiredDPI = 300;
-      const scaleFactor = desiredDPI / 96;
+      const scaleFactor = 300 / 96; // target 300 DPI from 96 DPI screen
       const width = element.offsetWidth * scaleFactor;
       const height = element.offsetHeight * scaleFactor;
 
@@ -148,16 +177,12 @@ const LabelPreview = ({
         quality: 1.0,
       });
 
-      // Generate timestamped filename
       const filename = `nutrition-label-${format.toLowerCase()}-${Date.now()}.png`;
-
-      // Trigger browser download
       const link = document.createElement('a');
       link.download = filename;
       link.href = dataUrl;
       link.click();
 
-      // Dismiss loading, show success
       toast.dismiss(loadingToastId);
       toast.success(`Label downloaded as ${filename}`);
     } catch (error) {
@@ -169,16 +194,20 @@ const LabelPreview = ({
     }
   };
 
+  // ── Derived ───────────────────────────────────────────────────────────
+
   const LabelComponent = labelComponents[format];
+
+  // ── Render ────────────────────────────────────────────────────────────
 
   return (
     <div className={cn('space-y-6', className)}>
       <Card className="p-2 border-none">
 
-        {/* ── Toolbar: Format Selector + Download ───────────────────── */}
+        {/* ── Toolbar ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-6">
 
-          {/* Format dropdown */}
+          {/* Format selector dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2 hover:text-primary-foreground">
@@ -199,33 +228,56 @@ const LabelPreview = ({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Download button with loading state */}
-          <Button
-            onClick={downloadLabel}
-            variant="outline"
-            disabled={isDownloading}
-            className="hover:text-primary-foreground min-w-[130px]"
-          >
-            {isDownloading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating…
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                Download
-              </>
-            )}
-          </Button>
+          {/* Right-side action buttons */}
+          <div className="flex items-center gap-2">
+
+            {/*
+              Zoom button — ADDED (1.6)
+              Opens the modal with a full-size render of the current label.
+              Uses ZoomIn icon from lucide-react (already installed).
+            */}
+            <Button
+              variant="outline"
+              onClick={() => setIsModalOpen(true)}
+              className="hover:text-primary-foreground"
+              title="View full size"
+            >
+              <ZoomIn className="h-4 w-4 mr-2" />
+              Full Size
+            </Button>
+
+            {/* Download button with loading state */}
+            <Button
+              onClick={downloadLabel}
+              variant="outline"
+              disabled={isDownloading}
+              className="hover:text-primary-foreground min-w-[130px]"
+            >
+              {isDownloading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
-        {/* ── Label Render Area ─────────────────────────────────────── */}
         {/*
-          The id="nutrition-label" div is what html-to-image captures.
-          It must contain only the label component — no toolbar buttons.
+          ── Card Label Render ────────────────────────────────────────
+          This is the ONLY element with id="nutrition-label".
+          html-to-image always captures this element for downloads.
+          The modal render below has NO id.
         */}
-        <div id="nutrition-label" className="flex justify-center bg-white rounded-lg">
+        <div
+          id="nutrition-label"
+          className="flex justify-center bg-white rounded-lg"
+        >
           {LabelComponent && <LabelComponent data={nutritionData} />}
         </div>
 
@@ -253,6 +305,144 @@ const LabelPreview = ({
           </div>
         )}
       </Card>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          LABEL ZOOM MODAL — ADDED (1.6)
+          ══════════════════════════════════════════════════════════════════
+          Uses @radix-ui/react-dialog directly (already installed as a
+          dependency of shadcn). No additional packages needed.
+          
+          Behaviour:
+          - Opens when user clicks "Full Size" button
+          - Closes on X button click, Escape key, or overlay click
+          - Format selector inside modal is synced with card (same state)
+          - Download button inside modal downloads from card's element
+            (id="nutrition-label") not from the modal render
+          - Modal label render has NO id to prevent any conflict
+      ══════════════════════════════════════════════════════════════════ */}
+      <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <Dialog.Portal>
+
+          {/* ── Backdrop overlay ──────────────────────────────────── */}
+          <Dialog.Overlay
+            className={cn(
+              'fixed inset-0 z-50 bg-black/70',
+              'data-[state=open]:animate-in data-[state=closed]:animate-out',
+              'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
+            )}
+          />
+
+          {/* ── Modal Content ──────────────────────────────────────── */}
+          <Dialog.Content
+            className={cn(
+              // Positioning — centered on screen
+              'fixed left-[50%] top-[50%] z-50',
+              'translate-x-[-50%] translate-y-[-50%]',
+              // Sizing — wide enough to show label clearly
+              'w-[95vw] max-w-2xl',
+              'max-h-[90vh]',
+              // Appearance
+              'bg-white rounded-xl shadow-2xl',
+              'flex flex-col',
+              // Entrance animation
+              'data-[state=open]:animate-in data-[state=closed]:animate-out',
+              'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+              'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+              'data-[state=closed]:slide-out-to-left-1/2 data-[state=open]:slide-in-from-left-1/2',
+              'data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-top-[48%]',
+              'duration-200'
+            )}
+          >
+
+            {/* ── Modal Header ──────────────────────────────────────── */}
+            <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <Dialog.Title className="text-lg font-semibold">
+                  Label Preview
+                </Dialog.Title>
+                <Badge variant="secondary">{format} Format</Badge>
+              </div>
+
+              {/* Modal toolbar — format selector + download + close */}
+              <div className="flex items-center gap-2">
+
+                {/* Format selector inside modal — same handler, same state */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1">
+                      <Globe className="w-3.5 h-3.5" />
+                      {format}
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(Object.keys(labelComponents) as LabelFormat[]).map((key) => (
+                      <DropdownMenuItem
+                        key={key}
+                        onClick={() => handleFormatChange(key)}
+                      >
+                        {key} Format
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/*
+                  Download button inside modal.
+                  Calls the same downloadLabel() handler which always
+                  targets id="nutrition-label" on the card — not this modal.
+                */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadLabel}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+
+                {/* Close button */}
+                <Dialog.Close asChild>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Close</span>
+                  </Button>
+                </Dialog.Close>
+              </div>
+            </div>
+
+            {/* ── Modal Body — scrollable label display ─────────────── */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="flex justify-center items-start p-8 bg-gray-50 min-h-full">
+                {/*
+                  Full-size label render.
+                  Intentionally has NO id attribute.
+                  This is a display-only render — download always uses
+                  the card's id="nutrition-label" element.
+                */}
+                {LabelComponent && (
+                  <div className="shadow-lg rounded">
+                    <LabelComponent data={nutritionData} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Modal Footer ──────────────────────────────────────── */}
+            <div className="px-6 py-3 border-t bg-gray-50 rounded-b-xl flex-shrink-0">
+              <p className="text-xs text-gray-500 text-center">
+                Press <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono">Esc</kbd> or click outside to close
+              </p>
+            </div>
+
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
     </div>
   );
 };
