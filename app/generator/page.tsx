@@ -1,3 +1,20 @@
+/**
+ * ============================================================
+ * Generator Page
+ * ============================================================
+ *
+ * Manual nutrition entry flow:
+ *   Left column  — NutritionForm (react-hook-form + zod)
+ *   Right column — LabelPreview (format selector + download + charts)
+ *
+ * FIX (1.7):
+ *   Previously LabelPreview was called with compact and showInfo={false}
+ *   which suppressed the nutrition charts.
+ *   Now called without those props so charts render correctly.
+ *   showCharts defaults to true inside LabelPreview.
+ * ============================================================
+ */
+
 'use client';
 
 import { useState } from 'react';
@@ -5,7 +22,7 @@ import { Card } from '@/components/ui/card';
 import { NutritionForm } from '../components/nutrition-form';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionData } from '../types/nutrition';
-import { ArrowRight, FileSpreadsheet, FileText, Image } from 'lucide-react';
+import { FileSpreadsheet, FileText, Image } from 'lucide-react';
 
 export default function Generator() {
   const [nutritionData, setNutritionData] = useState<NutritionData | null>(null);
@@ -13,26 +30,30 @@ export default function Generator() {
   const steps = [
     {
       icon: FileSpreadsheet,
-      title: "Enter Nutrition Data",
-      description: "Fill in your product's nutrition information in the form"
+      title: 'Enter Nutrition Data',
+      description: "Fill in your product's nutrition information in the form",
     },
     {
       icon: FileText,
-      title: "Choose Format",
-      description: "Select from US FDA, EU, Indian, Canadian, or Australian formats"
+      title: 'Choose Format',
+      description: 'Select from US FDA, EU, Indian, Canadian, or Australian formats',
     },
     {
       icon: Image,
-      title: "Download Label",
-      description: "Get your high-resolution nutrition label ready for packaging"
-    }
+      title: 'Download Label',
+      description: 'Get your high-resolution nutrition label ready for packaging',
+    },
   ];
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Ingredient Based Nutrition Label Generator</h1>
-      
+      <h1 className="text-3xl font-bold mb-8">
+        Ingredient Based Nutrition Label Generator
+      </h1>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        {/* ── Left: Nutrition Form ──────────────────────────────────── */}
         <div>
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Enter Nutrition Information</h2>
@@ -40,19 +61,24 @@ export default function Generator() {
           </Card>
         </div>
 
+        {/* ── Right: Label Preview + Charts ────────────────────────── */}
         <div>
           {nutritionData ? (
             <div className="sticky top-24">
-              <Card className="p-6">
-                <LabelPreview 
-                  nutritionData={nutritionData}
-                  compact
-                  showInfo={false}
-                  className="max-w-xl mx-auto"
-                />
-              </Card>
+              {/*
+                FIX (1.7): Removed compact and showInfo={false} props.
+                - showInfo defaults to true  → label info panel shows
+                - showCharts defaults to true → nutrition charts show
+                - compact defaults to false  → no compact mode restrictions
+                className kept for layout consistency.
+              */}
+              <LabelPreview
+                nutritionData={nutritionData}
+                className="max-w-xl mx-auto"
+              />
             </div>
           ) : (
+            /* ── Empty state before form submission ───────────────── */
             <div className="sticky top-24">
               <Card className="p-6">
                 <div className="space-y-8">
@@ -63,8 +89,8 @@ export default function Generator() {
                     </p>
                   </div>
 
+                  {/* Step indicators */}
                   <div className="relative">
-                   
                     <div className="space-y-6">
                       {steps.map((step, index) => (
                         <div key={index} className="flex items-start gap-4">
@@ -84,11 +110,11 @@ export default function Generator() {
                       ))}
                     </div>
 
-                    {/* Sample Labels */}
+                    {/* Sample label placeholders */}
                     <div className="mt-8 grid grid-cols-3 gap-4">
-                      {['US', 'EU', 'INDIA'].map((format) => (
+                      {['US', 'EU', 'INDIA'].map((fmt) => (
                         <div
-                          key={format}
+                          key={fmt}
                           className="aspect-[3/4] rounded-lg bg-gray-100 p-2 flex items-center justify-center"
                         >
                           <div className="text-center">
@@ -96,7 +122,7 @@ export default function Generator() {
                               <FileText className="w-6 h-6 text-gray-400" />
                             </div>
                             <span className="text-xs font-medium text-gray-600">
-                              {format}
+                              {fmt}
                             </span>
                           </div>
                         </div>

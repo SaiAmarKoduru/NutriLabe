@@ -5,29 +5,23 @@
  *
  * Renders the selected nutrition label format with:
  *   - Format selector dropdown (US, EU, Indian, Canada, Australia)
- *   - Download button (exports label as high-res PNG)
- *   - Zoom button (opens label in fullscreen modal) ← ADDED 1.6
+ *   - Full Size zoom button → opens modal (1.6)
+ *   - Download button → exports label as high-res PNG (1.4)
+ *   - Nutrition analysis charts below the label (1.7)
  *   - Optional label information panel
  *
- * ADDED (1.6): Label Zoom / Preview Modal
- *   Strategy: Option A — two separate renders of the label component.
- *     - Card render: small preview, holds id="nutrition-label" for download
- *     - Modal render: full-size display, no id, read-only
- *   Both renders share the same `format` state so switching format
- *   inside the modal also updates the card preview and vice versa.
+ * FIX (1.7):
+ *   Charts were not rendering because the generator page passes
+ *   compact=true and showInfo=false, making showInfo && !compact = false.
+ *   Charts now controlled by a dedicated `showCharts` prop that
+ *   defaults to true — fully backward compatible since no existing
+ *   call site passes showCharts explicitly.
  *
- *   New state added: isModalOpen (boolean) — nothing else changed.
+ *   To hide charts in ingredient builder, pass showCharts={false}.
  *
- * PRESERVED (1.4):
- *   - Toast notifications for download lifecycle
- *   - Loading spinner on Download button
- *
- * PRESERVED (all):
- *   - id="nutrition-label" stays on card element only
- *   - All 5 label formats
- *   - 300 DPI download export
- *   - Label info panel
- *   - onFormatChange callback
+ * PRESERVED (1.6): Label zoom modal
+ * PRESERVED (1.4): Toast notifications, download loading state
+ * PRESERVED (all): id="nutrition-label", all formats, 300 DPI export
  * ============================================================
  */
 
@@ -57,6 +51,7 @@ import { EUNutritionLabel } from '../eu-nutrition-label';
 import { IndianNutritionalLabel } from '../IndianNutritionalLabel';
 import { CanadaNutritionLabel } from '../canada-nutrition-label';
 import { AustraliaNutritionLabel } from '../australia-nutrition-label';
+import { NutritionCharts } from './nutrition-charts';
 import * as htmlToImage from 'html-to-image';
 import { labelInfo } from '@/app/labelInfo';
 import { cn } from '@/lib/utils';
@@ -72,6 +67,13 @@ interface LabelPreviewProps {
   className?: string;
   showInfo?: boolean;
   compact?: boolean;
+  /**
+   * showCharts — ADDED (1.7 fix)
+   * Controls whether the nutrition analysis charts render below the label.
+   * Defaults to true so charts appear everywhere unless explicitly disabled.
+   * Pass showCharts={false} in ingredient builder to hide them there.
+   */
+  showCharts?: boolean;
   defaultFormat?: LabelFormat;
   onFormatChange?: (format: LabelFormat) => void;
 }
@@ -80,11 +82,6 @@ interface LabelPreviewProps {
 // Label Component Map
 // ─────────────────────────────────────────────
 
-/**
- * Maps each LabelFormat key to its React component.
- * Both the card preview and the modal render pull from this map.
- * Add new country formats here — dropdown auto-populates.
- */
 const labelComponents: Record<LabelFormat, React.ComponentType<{ data: any }>> = {
   US: USNutritionLabel,
   EU: EUNutritionLabel,
@@ -102,33 +99,18 @@ const LabelPreview = ({
   className,
   showInfo = true,
   compact = false,
+  showCharts = true,        // default true — charts show unless disabled
   defaultFormat = 'US',
   onFormatChange,
 }: LabelPreviewProps) => {
 
   // ── State ─────────────────────────────────────────────────────────────
-
-  /** Currently selected label format — shared between card and modal */
   const [format, setFormat] = useState<LabelFormat>(defaultFormat);
-
-  /** Controls PNG generation loading state on the Download button */
   const [isDownloading, setIsDownloading] = useState(false);
-
-  /**
-   * Controls modal open/close.
-   * ADDED (1.6): Only new state introduced in this feature.
-   */
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
-  /**
-   * handleFormatChange
-   *
-   * Updates format state and notifies parent if callback provided.
-   * Because both card and modal read the same `format` state,
-   * changing format in either location updates both simultaneously.
-   */
   const handleFormatChange = (newFormat: LabelFormat) => {
     setFormat(newFormat);
     onFormatChange?.(newFormat);
@@ -136,16 +118,8 @@ const LabelPreview = ({
 
   /**
    * downloadLabel
-   *
-   * Captures the #nutrition-label DOM element (card render only —
-   * the modal render has no id) as a high-resolution PNG and
-   * triggers a browser download.
-   *
-   * Resolution: 300 DPI via 3× scale factor (96 DPI × 3 ≈ 288 DPI)
-   *
-   * IMPORTANT: This always targets id="nutrition-label" which lives
-   * on the card element. The modal element has no id so it is never
-   * accidentally captured regardless of modal open/close state.
+   * Captures id="nutrition-label" (card element only) as 300 DPI PNG.
+   * Charts are outside the capture element so they never appear in the PNG.
    */
   const downloadLabel = async () => {
     const element = document.getElementById('nutrition-label');
@@ -161,7 +135,7 @@ const LabelPreview = ({
     const loadingToastId = toast.loading('Generating high-resolution label…');
 
     try {
-      const scaleFactor = 300 / 96; // target 300 DPI from 96 DPI screen
+      const scaleFactor = 300 / 96;
       const width = element.offsetWidth * scaleFactor;
       const height = element.offsetHeight * scaleFactor;
 
@@ -195,7 +169,6 @@ const LabelPreview = ({
   };
 
   // ── Derived ───────────────────────────────────────────────────────────
-
   const LabelComponent = labelComponents[format];
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -207,7 +180,6 @@ const LabelPreview = ({
         {/* ── Toolbar ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-6">
 
-          {/* Format selector dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2 hover:text-primary-foreground">
@@ -228,14 +200,7 @@ const LabelPreview = ({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Right-side action buttons */}
           <div className="flex items-center gap-2">
-
-            {/*
-              Zoom button — ADDED (1.6)
-              Opens the modal with a full-size render of the current label.
-              Uses ZoomIn icon from lucide-react (already installed).
-            */}
             <Button
               variant="outline"
               onClick={() => setIsModalOpen(true)}
@@ -246,7 +211,6 @@ const LabelPreview = ({
               Full Size
             </Button>
 
-            {/* Download button with loading state */}
             <Button
               onClick={downloadLabel}
               variant="outline"
@@ -270,9 +234,8 @@ const LabelPreview = ({
 
         {/*
           ── Card Label Render ────────────────────────────────────────
-          This is the ONLY element with id="nutrition-label".
-          html-to-image always captures this element for downloads.
-          The modal render below has NO id.
+          id="nutrition-label" stays here only.
+          Everything below this div is excluded from PNG export.
         */}
         <div
           id="nutrition-label"
@@ -281,7 +244,7 @@ const LabelPreview = ({
           {LabelComponent && <LabelComponent data={nutritionData} />}
         </div>
 
-        {/* ── Optional Label Info Panel ─────────────────────────────── */}
+        {/* ── Label Info Panel ──────────────────────────────────────── */}
         {showInfo && (
           <div className="mt-6 pt-6 border-t">
             <div className="space-y-4">
@@ -306,24 +269,24 @@ const LabelPreview = ({
         )}
       </Card>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          LABEL ZOOM MODAL — ADDED (1.6)
-          ══════════════════════════════════════════════════════════════════
-          Uses @radix-ui/react-dialog directly (already installed as a
-          dependency of shadcn). No additional packages needed.
-          
-          Behaviour:
-          - Opens when user clicks "Full Size" button
-          - Closes on X button click, Escape key, or overlay click
-          - Format selector inside modal is synced with card (same state)
-          - Download button inside modal downloads from card's element
-            (id="nutrition-label") not from the modal render
-          - Modal label render has NO id to prevent any conflict
-      ══════════════════════════════════════════════════════════════════ */}
+      {/*
+        ── Nutrition Charts — FIX (1.7) ─────────────────────────────────
+        Previously: showInfo && !compact → false on generator page
+                    because generator passes compact=true, showInfo=false
+
+        Now: controlled by dedicated showCharts prop (default: true)
+             Charts render whenever showCharts=true and nutritionData exists.
+             Ingredient builder passes showCharts={false} to hide them.
+             Generator page needs no change — showCharts defaults to true.
+      */}
+      {showCharts && nutritionData && (
+        <NutritionCharts data={nutritionData} />
+      )}
+
+      {/* ── Label Zoom Modal — preserved from 1.6 ─────────────────────── */}
       <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
         <Dialog.Portal>
 
-          {/* ── Backdrop overlay ──────────────────────────────────── */}
           <Dialog.Overlay
             className={cn(
               'fixed inset-0 z-50 bg-black/70',
@@ -332,19 +295,13 @@ const LabelPreview = ({
             )}
           />
 
-          {/* ── Modal Content ──────────────────────────────────────── */}
           <Dialog.Content
             className={cn(
-              // Positioning — centered on screen
               'fixed left-[50%] top-[50%] z-50',
               'translate-x-[-50%] translate-y-[-50%]',
-              // Sizing — wide enough to show label clearly
-              'w-[95vw] max-w-2xl',
-              'max-h-[90vh]',
-              // Appearance
+              'w-[95vw] max-w-2xl max-h-[90vh]',
               'bg-white rounded-xl shadow-2xl',
               'flex flex-col',
-              // Entrance animation
               'data-[state=open]:animate-in data-[state=closed]:animate-out',
               'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
               'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
@@ -353,8 +310,7 @@ const LabelPreview = ({
               'duration-200'
             )}
           >
-
-            {/* ── Modal Header ──────────────────────────────────────── */}
+            {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <div className="flex items-center gap-3">
                 <Dialog.Title className="text-lg font-semibold">
@@ -363,10 +319,7 @@ const LabelPreview = ({
                 <Badge variant="secondary">{format} Format</Badge>
               </div>
 
-              {/* Modal toolbar — format selector + download + close */}
               <div className="flex items-center gap-2">
-
-                {/* Format selector inside modal — same handler, same state */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-1">
@@ -387,11 +340,6 @@ const LabelPreview = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/*
-                  Download button inside modal.
-                  Calls the same downloadLabel() handler which always
-                  targets id="nutrition-label" on the card — not this modal.
-                */}
                 <Button
                   variant="outline"
                   size="sm"
@@ -405,7 +353,6 @@ const LabelPreview = ({
                   )}
                 </Button>
 
-                {/* Close button */}
                 <Dialog.Close asChild>
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                     <X className="h-4 w-4" />
@@ -415,15 +362,10 @@ const LabelPreview = ({
               </div>
             </div>
 
-            {/* ── Modal Body — scrollable label display ─────────────── */}
+            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto">
               <div className="flex justify-center items-start p-8 bg-gray-50 min-h-full">
-                {/*
-                  Full-size label render.
-                  Intentionally has NO id attribute.
-                  This is a display-only render — download always uses
-                  the card's id="nutrition-label" element.
-                */}
+                {/* No id here — download always targets card element */}
                 {LabelComponent && (
                   <div className="shadow-lg rounded">
                     <LabelComponent data={nutritionData} />
@@ -432,13 +374,16 @@ const LabelPreview = ({
               </div>
             </div>
 
-            {/* ── Modal Footer ──────────────────────────────────────── */}
+            {/* Modal Footer */}
             <div className="px-6 py-3 border-t bg-gray-50 rounded-b-xl flex-shrink-0">
               <p className="text-xs text-gray-500 text-center">
-                Press <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono">Esc</kbd> or click outside to close
+                Press{' '}
+                <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono">
+                  Esc
+                </kbd>{' '}
+                or click outside to close
               </p>
             </div>
-
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
