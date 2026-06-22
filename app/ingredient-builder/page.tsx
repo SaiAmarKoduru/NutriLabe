@@ -5,15 +5,11 @@
  * Ingredient Builder Page
  * ============================================================
  *
- * Two-step wizard:
- *   Step 1 — Search USDA database, add ingredients with quantities
- *   Step 2 — Review per-serving nutrition and preview the label
+ * ADDED (2.1): Pass `ingredients` prop to LabelPreview in Step 2
+ *   so allergen detection runs against the actual recipe ingredients.
  *
- * FIXED (1.1): Per-serving nutrition calculation
- * ADDED (1.4): Toast notifications for ingredient actions
- *   - Ingredient removed → info toast
- *   - All ingredients cleared → warning toast
- *   - Quantity edit confirmed → success toast
+ * All other logic preserved from 1.4 (toasts, edit, clear all).
+ * Per-serving calculation preserved from 1.1.
  * ============================================================
  */
 
@@ -34,48 +30,16 @@ import { NutritionData } from '../types/nutrition';
 // Constants
 // ─────────────────────────────────────────────
 
-/**
- * Nutrient keys we sum and display.
- * Excludes servingSize and servingsPerContainer which are
- * recipe-level metadata, not per-ingredient nutrient values.
- */
 const NUTRIENT_KEYS: (keyof Omit<NutritionData, 'servingSize' | 'servingsPerContainer'>)[] = [
-  'calories',
-  'totalFat',
-  'saturatedFat',
-  'transFat',
-  'cholesterol',
-  'sodium',
-  'totalCarbohydrates',
-  'dietaryFiber',
-  'sugars',
-  'protein',
-  'vitaminD',
-  'calcium',
-  'iron',
-  'potassium',
+  'calories', 'totalFat', 'saturatedFat', 'transFat', 'cholesterol',
+  'sodium', 'totalCarbohydrates', 'dietaryFiber', 'sugars', 'protein',
+  'vitaminD', 'calcium', 'iron', 'potassium',
 ];
 
 // ─────────────────────────────────────────────
-// Utility — Per-Serving Nutrition Calculator
+// Per-Serving Calculator (from 1.1)
 // ─────────────────────────────────────────────
 
-/**
- * calculatePerServingNutrition
- *
- * Converts the ingredient list into accurate per-serving NutritionData.
- *
- * Algorithm:
- *   1. Sum each ingredient's nutrition contribution (scaled by quantity)
- *   2. Sum total recipe weight in grams
- *   3. Scale total nutrition to one serving:
- *      perServing = (totalNutrition / totalWeight) × servingSize
- *
- * Edge cases:
- *   - No ingredients → returns zero nutrition
- *   - Total weight = 0 → returns zero nutrition
- *   - servingSize = 0 → returns total recipe nutrition with warning flag
- */
 function calculatePerServingNutrition(
   ingredients: RecipeIngredient[],
   servingSize: number,
@@ -85,46 +49,33 @@ function calculatePerServingNutrition(
     calories: 0, totalFat: 0, saturatedFat: 0, transFat: 0,
     cholesterol: 0, sodium: 0, totalCarbohydrates: 0, dietaryFiber: 0,
     sugars: 0, protein: 0, vitaminD: 0, calcium: 0, iron: 0, potassium: 0,
-    servingSize,
-    servingsPerContainer,
+    servingSize, servingsPerContainer,
   };
 
   if (ingredients.length === 0) return zero;
 
-  // Step 1 & 2 — accumulate totals
   let totalWeightGrams = 0;
   const totals = { ...zero };
 
   for (const ingredient of ingredients) {
     const weightGrams = convertToGrams(ingredient.quantity, ingredient.unit);
     totalWeightGrams += weightGrams;
-
     const contribution = calculateIngredientNutrition(
-      ingredient.nutritionPer100g,
-      ingredient.quantity,
-      ingredient.unit
+      ingredient.nutritionPer100g, ingredient.quantity, ingredient.unit
     );
-
     for (const key of NUTRIENT_KEYS) {
       totals[key] += (contribution[key] ?? 0);
     }
   }
 
   if (totalWeightGrams === 0) return zero;
+  if (!servingSize || servingSize <= 0) return { ...totals, servingSize: 0, servingsPerContainer };
 
-  // Fall back to total recipe nutrition if serving size not set
-  if (!servingSize || servingSize <= 0) {
-    return { ...totals, servingSize: 0, servingsPerContainer };
-  }
-
-  // Step 3 — scale to one serving
   const scaleFactor = servingSize / totalWeightGrams;
   const perServing = { ...zero };
-
   for (const key of NUTRIENT_KEYS) {
     perServing[key] = Math.round(totals[key] * scaleFactor * 100) / 100;
   }
-
   return perServing;
 }
 
@@ -133,7 +84,6 @@ function calculatePerServingNutrition(
 // ─────────────────────────────────────────────
 
 export default function IngredientBuilder() {
-  // ── Recipe State ──────────────────────────────────────────────────────
   const [recipe, setRecipe] = useState({
     name: '',
     servingSize: 0,
@@ -141,33 +91,23 @@ export default function IngredientBuilder() {
     ingredients: [] as RecipeIngredient[],
   });
 
-  // ── Wizard State ──────────────────────────────────────────────────────
   const [activeStep, setActiveStep] = useState(1);
-
-  // ── Inline Edit State ─────────────────────────────────────────────────
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<{ quantity: number; unit: string }>({
-    quantity: 0,
-    unit: 'g',
+    quantity: 0, unit: 'g',
   });
 
-  // ── Derived Nutrition (never stored, always computed) ─────────────────
+  // Derived — never stored, always computed
   const perServingNutrition = calculatePerServingNutrition(
-    recipe.ingredients,
-    recipe.servingSize,
-    recipe.servingsPerContainer
+    recipe.ingredients, recipe.servingSize, recipe.servingsPerContainer
   );
 
-  // ── Wizard Step Definitions ───────────────────────────────────────────
   const steps = [
     {
       number: 1,
       title: 'Add Recipe & Ingredients',
       description: 'Enter recipe details and add ingredients',
-      isComplete:
-        recipe.name !== '' &&
-        recipe.servingSize > 0 &&
-        recipe.ingredients.length > 0,
+      isComplete: recipe.name !== '' && recipe.servingSize > 0 && recipe.ingredients.length > 0,
     },
     {
       number: 2,
@@ -179,40 +119,21 @@ export default function IngredientBuilder() {
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
-  /**
-   * Adds a new ingredient.
-   * Toast is handled inside USDAIngredientSearch on successful add.
-   */
   const handleAddIngredient = (ingredient: RecipeIngredient) => {
-    setRecipe((prev) => ({
-      ...prev,
-      ingredients: [...prev.ingredients, ingredient],
-    }));
+    setRecipe((prev) => ({ ...prev, ingredients: [...prev.ingredients, ingredient] }));
   };
 
-  /**
-   * Removes an ingredient by index.
-   * Shows an info toast confirming which ingredient was removed.
-   */
   const handleRemoveIngredient = (index: number) => {
     const name = recipe.ingredients[index]?.name ?? 'Ingredient';
-
     setRecipe((prev) => ({
       ...prev,
       ingredients: prev.ingredients.filter((_, i) => i !== index),
     }));
-
     if (editingIndex === index) setEditingIndex(null);
-
-    // Short name to keep toast concise
     const shortName = name.length > 30 ? name.slice(0, 30) + '…' : name;
     toast.info(`Removed ${shortName}`);
   };
 
-  /**
-   * Clears all ingredients.
-   * Shows a warning toast since this is a destructive action.
-   */
   const handleClearAll = () => {
     const count = recipe.ingredients.length;
     setRecipe((prev) => ({ ...prev, ingredients: [] }));
@@ -220,59 +141,38 @@ export default function IngredientBuilder() {
     toast.warning(`Cleared all ${count} ingredient${count !== 1 ? 's' : ''}`);
   };
 
-  /**
-   * Begins inline editing for a specific ingredient row.
-   */
   const handleStartEdit = (index: number) => {
     const ingredient = recipe.ingredients[index];
     setEditingIndex(index);
     setEditValues({ quantity: ingredient.quantity, unit: ingredient.unit });
   };
 
-  /**
-   * Commits the edited quantity back to the ingredient list.
-   * Shows a success toast confirming the update.
-   */
   const handleConfirmEdit = () => {
     if (editingIndex === null) return;
-    if (editValues.quantity <= 0) {
-      toast.error('Quantity must be greater than 0.');
-      return;
-    }
-
+    if (editValues.quantity <= 0) { toast.error('Quantity must be greater than 0.'); return; }
     const name = recipe.ingredients[editingIndex]?.name ?? 'Ingredient';
-
     setRecipe((prev) => ({
       ...prev,
       ingredients: prev.ingredients.map((ing, i) =>
-        i === editingIndex
-          ? { ...ing, quantity: editValues.quantity, unit: editValues.unit }
-          : ing
+        i === editingIndex ? { ...ing, quantity: editValues.quantity, unit: editValues.unit } : ing
       ),
     }));
-
     setEditingIndex(null);
     toast.success(`Updated: ${editValues.quantity}${editValues.unit} of ${name.slice(0, 25)}`);
   };
 
-  /**
-   * Cancels inline editing without saving.
-   */
-  const handleCancelEdit = () => {
-    setEditingIndex(null);
-  };
+  const handleCancelEdit = () => setEditingIndex(null);
 
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
 
-      {/* ── Page Header ───────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Ingredient Nutrition Builder</h1>
         <p className="text-gray-600">Create nutrition labels from your ingredients</p>
 
-        {/* Progress Steps */}
         <div className="grid grid-cols-2 gap-4 mt-6">
           {steps.map((step) => (
             <button
@@ -281,21 +181,15 @@ export default function IngredientBuilder() {
               className={`p-4 rounded-lg border-2 transition-all text-left ${
                 activeStep === step.number
                   ? 'border-blue-500 bg-blue-50'
-                  : step.isComplete
-                  ? 'border-green-200 bg-green-50'
-                  : 'border-gray-200'
+                  : step.isComplete ? 'border-green-200 bg-green-50' : 'border-gray-200'
               }`}
             >
               <div className="flex items-center gap-3">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    activeStep === step.number
-                      ? 'bg-blue-500 text-white'
-                      : step.isComplete
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-200'
-                  }`}
-                >
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  activeStep === step.number
+                    ? 'bg-blue-500 text-white'
+                    : step.isComplete ? 'bg-green-500 text-white' : 'bg-gray-200'
+                }`}>
                   {step.number}
                 </div>
                 <div>
@@ -308,29 +202,21 @@ export default function IngredientBuilder() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          STEP 1 — Recipe Details + Ingredient Search
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── Step 1 ──────────────────────────────────────────────────────── */}
       {activeStep === 1 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-          {/* ── Left: Recipe Info + Search ─────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
               <div className="space-y-4">
-
                 <div>
                   <Label htmlFor="name">Product Name</Label>
                   <Input
                     id="name"
                     value={recipe.name}
-                    onChange={(e) =>
-                      setRecipe((prev) => ({ ...prev, name: e.target.value }))
-                    }
+                    onChange={(e) => setRecipe((prev) => ({ ...prev, name: e.target.value }))}
                     placeholder="Enter product name"
                   />
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="servingSize">Serving Size (g)</Label>
@@ -340,10 +226,7 @@ export default function IngredientBuilder() {
                       min="1"
                       value={recipe.servingSize || ''}
                       onChange={(e) =>
-                        setRecipe((prev) => ({
-                          ...prev,
-                          servingSize: parseFloat(e.target.value) || 0,
-                        }))
+                        setRecipe((prev) => ({ ...prev, servingSize: parseFloat(e.target.value) || 0 }))
                       }
                       placeholder="e.g. 30"
                     />
@@ -356,31 +239,24 @@ export default function IngredientBuilder() {
                       min="1"
                       value={recipe.servingsPerContainer || ''}
                       onChange={(e) =>
-                        setRecipe((prev) => ({
-                          ...prev,
-                          servingsPerContainer: parseFloat(e.target.value) || 1,
-                        }))
+                        setRecipe((prev) => ({ ...prev, servingsPerContainer: parseFloat(e.target.value) || 1 }))
                       }
                       placeholder="e.g. 8"
                     />
                   </div>
                 </div>
-
-                {/* Serving size warning */}
                 {recipe.ingredients.length > 0 && recipe.servingSize <= 0 && (
                   <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                     ⚠ Please enter a serving size so the label shows per-serving values.
                   </p>
                 )}
               </div>
-
               <div className="mt-6">
                 <USDAIngredientSearch onIngredientAdd={handleAddIngredient} />
               </div>
             </Card>
           </div>
 
-          {/* ── Right: Ingredient List ─────────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
               <div className="space-y-4">
@@ -393,8 +269,6 @@ export default function IngredientBuilder() {
                       </span>
                     )}
                   </h3>
-
-                  {/* Clear all — only visible when ingredients exist */}
                   {recipe.ingredients.length > 0 && (
                     <Button
                       variant="ghost"
@@ -407,7 +281,6 @@ export default function IngredientBuilder() {
                   )}
                 </div>
 
-                {/* Empty state */}
                 {recipe.ingredients.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     Search and add ingredients to your recipe
@@ -420,11 +293,7 @@ export default function IngredientBuilder() {
                         className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate text-sm">
-                            {ingredient.name}
-                          </div>
-
-                          {/* Inline edit mode */}
+                          <div className="font-medium truncate text-sm">{ingredient.name}</div>
                           {editingIndex === index ? (
                             <div className="flex items-center gap-2 mt-1">
                               <Input
@@ -440,23 +309,11 @@ export default function IngredientBuilder() {
                                 }
                                 className="h-7 w-20 text-sm"
                               />
-                              <span className="text-sm text-gray-500">
-                                {editValues.unit}
-                              </span>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-green-600 hover:bg-green-50"
-                                onClick={handleConfirmEdit}
-                              >
+                              <span className="text-sm text-gray-500">{editValues.unit}</span>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" onClick={handleConfirmEdit}>
                                 <Check className="w-3 h-3" />
                               </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-gray-400 hover:bg-gray-100"
-                                onClick={handleCancelEdit}
-                              >
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-gray-400" onClick={handleCancelEdit}>
                                 <X className="w-3 h-3" />
                               </Button>
                             </div>
@@ -466,24 +323,12 @@ export default function IngredientBuilder() {
                             </div>
                           )}
                         </div>
-
-                        {/* Edit + Remove buttons */}
                         {editingIndex !== index && (
                           <div className="flex items-center gap-1 ml-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-400 hover:text-blue-500"
-                              onClick={() => handleStartEdit(index)}
-                            >
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-blue-500" onClick={() => handleStartEdit(index)}>
                               <Pencil className="w-3.5 h-3.5" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-400 hover:text-red-500"
-                              onClick={() => handleRemoveIngredient(index)}
-                            >
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-500" onClick={() => handleRemoveIngredient(index)}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
@@ -495,37 +340,23 @@ export default function IngredientBuilder() {
               </div>
             </Card>
 
-            {/* Proceed button — only shown when all required fields are filled */}
-            {recipe.ingredients.length > 0 &&
-              recipe.name &&
-              recipe.servingSize > 0 &&
-              recipe.servingsPerContainer > 0 && (
-                <Button
-                  variant="default"
-                  className="w-full"
-                  onClick={() => setActiveStep(2)}
-                >
-                  Review & Generate
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
+            {recipe.ingredients.length > 0 && recipe.name && recipe.servingSize > 0 && recipe.servingsPerContainer > 0 && (
+              <Button variant="default" className="w-full" onClick={() => setActiveStep(2)}>
+                Review & Generate
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          STEP 2 — Nutrition Summary + Label Preview
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── Step 2 ──────────────────────────────────────────────────────── */}
       {activeStep === 2 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-          {/* ── Left: Recipe Summary ───────────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Recipe Summary</h2>
-
               <div className="space-y-4">
-                {/* Metadata */}
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <div className="grid grid-cols-2 gap-y-2 text-sm">
                     <div className="text-gray-500">Product Name</div>
@@ -538,8 +369,6 @@ export default function IngredientBuilder() {
                     <div className="font-medium">{recipe.ingredients.length}</div>
                   </div>
                 </div>
-
-                {/* Per-serving nutrient grid */}
                 <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                   Nutrition Per Serving ({recipe.servingSize}g)
                 </h3>
@@ -551,35 +380,33 @@ export default function IngredientBuilder() {
                       </div>
                       <div className="font-medium text-sm">
                         {perServingNutrition[key].toFixed(1)}
-                        {key === 'calories'
-                          ? ' kcal'
+                        {key === 'calories' ? ' kcal'
                           : ['sodium', 'cholesterol', 'calcium', 'iron', 'potassium', 'vitaminD'].includes(key)
-                          ? ' mg'
-                          : ' g'}
+                          ? ' mg' : ' g'}
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
             </Card>
-
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => setActiveStep(1)}
-            >
+            <Button variant="outline" className="w-full" onClick={() => setActiveStep(1)}>
               Back to Ingredients
             </Button>
           </div>
 
-          {/* ── Right: Label Preview ───────────────────────────────────── */}
           <div className="space-y-6">
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Nutrition Label Preview</h2>
+              {/*
+                ADDED (2.1): Pass ingredients to LabelPreview.
+                This enables allergen detection in the preview panel.
+                The allergen panel appears below the charts automatically.
+              */}
               <LabelPreview
                 nutritionData={perServingNutrition}
                 compact
                 showInfo={false}
+                ingredients={recipe.ingredients}
               />
             </Card>
           </div>
