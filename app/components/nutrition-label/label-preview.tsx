@@ -8,17 +8,17 @@
  *   - Full Size zoom button → opens modal (1.6)
  *   - Download button → exports label as high-res PNG (1.4)
  *   - Nutrition analysis charts below the label (1.7)
+ *   - Allergen detection panel (2.1) ← ADDED
  *   - Optional label information panel
  *
- * FIX (1.7):
- *   Charts were not rendering because the generator page passes
- *   compact=true and showInfo=false, making showInfo && !compact = false.
- *   Charts now controlled by a dedicated `showCharts` prop that
- *   defaults to true — fully backward compatible since no existing
- *   call site passes showCharts explicitly.
+ * ADDED (2.1):
+ *   - New optional prop: `ingredients?: RecipeIngredient[]`
+ *   - `detectAllergens()` called with ingredients when provided
+ *   - `<AllergenDisplay>` rendered below nutrition charts
+ *   - Generator page: no ingredients → shows "use ingredient builder" prompt
+ *   - Ingredient builder: passes ingredients → full allergen detection
  *
- *   To hide charts in ingredient builder, pass showCharts={false}.
- *
+ * PRESERVED (1.7): Nutrition charts
  * PRESERVED (1.6): Label zoom modal
  * PRESERVED (1.4): Toast notifications, download loading state
  * PRESERVED (all): id="nutrition-label", all formats, 300 DPI export
@@ -28,6 +28,7 @@
 'use client';
 
 import { LabelFormat } from '@/app/types/nutrition';
+import { RecipeIngredient } from '@/app/types/recipe';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -43,7 +44,7 @@ import {
   ZoomIn,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import * as Dialog from '@radix-ui/react-dialog';
 import { USNutritionLabel } from '../us-nutrition-label';
@@ -52,6 +53,8 @@ import { IndianNutritionalLabel } from '../IndianNutritionalLabel';
 import { CanadaNutritionLabel } from '../canada-nutrition-label';
 import { AustraliaNutritionLabel } from '../australia-nutrition-label';
 import { NutritionCharts } from './nutrition-charts';
+import { AllergenDisplay } from './allergen-display';
+import { detectAllergens } from '@/app/lib/allergens';
 import * as htmlToImage from 'html-to-image';
 import { labelInfo } from '@/app/labelInfo';
 import { cn } from '@/lib/utils';
@@ -67,13 +70,14 @@ interface LabelPreviewProps {
   className?: string;
   showInfo?: boolean;
   compact?: boolean;
-  /**
-   * showCharts — ADDED (1.7 fix)
-   * Controls whether the nutrition analysis charts render below the label.
-   * Defaults to true so charts appear everywhere unless explicitly disabled.
-   * Pass showCharts={false} in ingredient builder to hide them there.
-   */
   showCharts?: boolean;
+  /**
+   * ingredients — ADDED (2.1)
+   * Optional list of recipe ingredients used for allergen detection.
+   * When provided: full allergen detection runs.
+   * When omitted (generator page): "use ingredient builder" prompt shown.
+   */
+  ingredients?: RecipeIngredient[];
   defaultFormat?: LabelFormat;
   onFormatChange?: (format: LabelFormat) => void;
 }
@@ -99,7 +103,8 @@ const LabelPreview = ({
   className,
   showInfo = true,
   compact = false,
-  showCharts = true,        // default true — charts show unless disabled
+  showCharts = true,
+  ingredients,
   defaultFormat = 'US',
   onFormatChange,
 }: LabelPreviewProps) => {
@@ -108,6 +113,24 @@ const LabelPreview = ({
   const [format, setFormat] = useState<LabelFormat>(defaultFormat);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // ── Allergen Detection ────────────────────────────────────────────────
+  /**
+   * Memoized so detection only re-runs when the ingredients array changes.
+   * detectAllergens() is a pure function so this is safe.
+   * Returns empty array when no ingredients provided.
+   */
+  const allergenResults = useMemo(
+    () => detectAllergens(ingredients ?? []),
+    [ingredients]
+  );
+
+  /**
+   * hasIngredients flag passed to AllergenDisplay to distinguish between:
+   *   - Generator page (no ingredient list) → show prompt
+   *   - Ingredient builder (ingredient list exists) → run detection
+   */
+  const hasIngredients = Array.isArray(ingredients) && ingredients.length > 0;
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
@@ -118,8 +141,8 @@ const LabelPreview = ({
 
   /**
    * downloadLabel
-   * Captures id="nutrition-label" (card element only) as 300 DPI PNG.
-   * Charts are outside the capture element so they never appear in the PNG.
+   * Captures id="nutrition-label" as 300 DPI PNG.
+   * Charts and allergen panel are outside the capture element.
    */
   const downloadLabel = async () => {
     const element = document.getElementById('nutrition-label');
@@ -233,9 +256,9 @@ const LabelPreview = ({
         </div>
 
         {/*
-          ── Card Label Render ────────────────────────────────────────
-          id="nutrition-label" stays here only.
-          Everything below this div is excluded from PNG export.
+          ── Label Render ─────────────────────────────────────────────
+          id="nutrition-label" is on this element only.
+          Everything below is excluded from PNG download.
         */}
         <div
           id="nutrition-label"
@@ -269,21 +292,27 @@ const LabelPreview = ({
         )}
       </Card>
 
-      {/*
-        ── Nutrition Charts — FIX (1.7) ─────────────────────────────────
-        Previously: showInfo && !compact → false on generator page
-                    because generator passes compact=true, showInfo=false
-
-        Now: controlled by dedicated showCharts prop (default: true)
-             Charts render whenever showCharts=true and nutritionData exists.
-             Ingredient builder passes showCharts={false} to hide them.
-             Generator page needs no change — showCharts defaults to true.
-      */}
+      {/* ── Nutrition Charts (1.7) ────────────────────────────────────── */}
       {showCharts && nutritionData && (
         <NutritionCharts data={nutritionData} />
       )}
 
-      {/* ── Label Zoom Modal — preserved from 1.6 ─────────────────────── */}
+      {/*
+        ── Allergen Display (2.1) ────────────────────────────────────────
+        Always rendered when nutritionData exists.
+        AllergenDisplay handles its own empty/no-ingredient states internally.
+
+        hasIngredients=false → generator page prompt
+        hasIngredients=true  → full detection results
+      */}
+      {nutritionData && (
+        <AllergenDisplay
+          results={allergenResults}
+          hasIngredients={hasIngredients}
+        />
+      )}
+
+      {/* ── Label Zoom Modal (1.6) ────────────────────────────────────── */}
       <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
         <Dialog.Portal>
 
@@ -310,7 +339,6 @@ const LabelPreview = ({
               'duration-200'
             )}
           >
-            {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <div className="flex items-center gap-3">
                 <Dialog.Title className="text-lg font-semibold">
@@ -362,10 +390,8 @@ const LabelPreview = ({
               </div>
             </div>
 
-            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto">
               <div className="flex justify-center items-start p-8 bg-gray-50 min-h-full">
-                {/* No id here — download always targets card element */}
                 {LabelComponent && (
                   <div className="shadow-lg rounded">
                     <LabelComponent data={nutritionData} />
@@ -374,7 +400,6 @@ const LabelPreview = ({
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="px-6 py-3 border-t bg-gray-50 rounded-b-xl flex-shrink-0">
               <p className="text-xs text-gray-500 text-center">
                 Press{' '}
