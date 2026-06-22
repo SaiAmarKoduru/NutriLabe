@@ -3,21 +3,12 @@
  * Label Preview Component
  * ============================================================
  *
- * Renders the selected nutrition label format with:
- *   - Format selector dropdown (US, EU, Indian, Canada, Australia)
- *   - Full Size zoom button → opens modal (1.6)
- *   - Download button → exports label as high-res PNG (1.4)
- *   - Nutrition analysis charts below the label (1.7)
- *   - Allergen detection panel (2.1) ← ADDED
- *   - Optional label information panel
+ * ADDED (2.2): Dietary tag detection + display
+ *   - detectDietaryTags() called with ingredients (memoized)
+ *   - <DietaryTagDisplay> rendered below allergen panel
+ *   - No new props needed — uses existing `ingredients` prop from 2.1
  *
- * ADDED (2.1):
- *   - New optional prop: `ingredients?: RecipeIngredient[]`
- *   - `detectAllergens()` called with ingredients when provided
- *   - `<AllergenDisplay>` rendered below nutrition charts
- *   - Generator page: no ingredients → shows "use ingredient builder" prompt
- *   - Ingredient builder: passes ingredients → full allergen detection
- *
+ * PRESERVED (2.1): Allergen detection panel
  * PRESERVED (1.7): Nutrition charts
  * PRESERVED (1.6): Label zoom modal
  * PRESERVED (1.4): Toast notifications, download loading state
@@ -54,7 +45,9 @@ import { CanadaNutritionLabel } from '../canada-nutrition-label';
 import { AustraliaNutritionLabel } from '../australia-nutrition-label';
 import { NutritionCharts } from './nutrition-charts';
 import { AllergenDisplay } from './allergen-display';
+import { DietaryTagDisplay } from './dietary-tag-display';
 import { detectAllergens } from '@/app/lib/allergens';
+import { detectDietaryTags } from '@/app/lib/dietary-tags';
 import * as htmlToImage from 'html-to-image';
 import { labelInfo } from '@/app/labelInfo';
 import { cn } from '@/lib/utils';
@@ -71,12 +64,6 @@ interface LabelPreviewProps {
   showInfo?: boolean;
   compact?: boolean;
   showCharts?: boolean;
-  /**
-   * ingredients — ADDED (2.1)
-   * Optional list of recipe ingredients used for allergen detection.
-   * When provided: full allergen detection runs.
-   * When omitted (generator page): "use ingredient builder" prompt shown.
-   */
   ingredients?: RecipeIngredient[];
   defaultFormat?: LabelFormat;
   onFormatChange?: (format: LabelFormat) => void;
@@ -114,11 +101,11 @@ const LabelPreview = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // ── Allergen Detection ────────────────────────────────────────────────
+  // ── Memoized Detections ───────────────────────────────────────────────
+
   /**
-   * Memoized so detection only re-runs when the ingredients array changes.
-   * detectAllergens() is a pure function so this is safe.
-   * Returns empty array when no ingredients provided.
+   * Allergen detection — memoized, re-runs only when ingredients change.
+   * Pure function from app/lib/allergens.ts
    */
   const allergenResults = useMemo(
     () => detectAllergens(ingredients ?? []),
@@ -126,10 +113,16 @@ const LabelPreview = ({
   );
 
   /**
-   * hasIngredients flag passed to AllergenDisplay to distinguish between:
-   *   - Generator page (no ingredient list) → show prompt
-   *   - Ingredient builder (ingredient list exists) → run detection
+   * Dietary tag detection — memoized, re-runs only when ingredients change.
+   * Pure function from app/lib/dietary-tags.ts
+   * ADDED (2.2)
    */
+  const dietaryTags = useMemo(
+    () => detectDietaryTags(ingredients ?? []),
+    [ingredients]
+  );
+
+  /** True when we have a real ingredient list to analyse */
   const hasIngredients = Array.isArray(ingredients) && ingredients.length > 0;
 
   // ── Handlers ──────────────────────────────────────────────────────────
@@ -142,16 +135,12 @@ const LabelPreview = ({
   /**
    * downloadLabel
    * Captures id="nutrition-label" as 300 DPI PNG.
-   * Charts and allergen panel are outside the capture element.
+   * Charts, allergen panel, and dietary tags are all outside
+   * the capture element and never appear in the downloaded PNG.
    */
   const downloadLabel = async () => {
     const element = document.getElementById('nutrition-label');
-
-    if (!element) {
-      toast.error('Label element not found. Please try again.');
-      return;
-    }
-
+    if (!element) { toast.error('Label element not found. Please try again.'); return; }
     if (isDownloading) return;
 
     setIsDownloading(true);
@@ -159,12 +148,9 @@ const LabelPreview = ({
 
     try {
       const scaleFactor = 300 / 96;
-      const width = element.offsetWidth * scaleFactor;
-      const height = element.offsetHeight * scaleFactor;
-
       const dataUrl = await htmlToImage.toPng(element, {
-        width,
-        height,
+        width: element.offsetWidth * scaleFactor,
+        height: element.offsetHeight * scaleFactor,
         style: {
           transform: `scale(${scaleFactor})`,
           transformOrigin: 'top left',
@@ -191,7 +177,6 @@ const LabelPreview = ({
     }
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────
   const LabelComponent = labelComponents[format];
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -202,7 +187,6 @@ const LabelPreview = ({
 
         {/* ── Toolbar ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-6">
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2 hover:text-primary-foreground">
@@ -213,10 +197,7 @@ const LabelPreview = ({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {(Object.keys(labelComponents) as LabelFormat[]).map((key) => (
-                <DropdownMenuItem
-                  key={key}
-                  onClick={() => handleFormatChange(key)}
-                >
+                <DropdownMenuItem key={key} onClick={() => handleFormatChange(key)}>
                   {key} Format
                 </DropdownMenuItem>
               ))}
@@ -241,29 +222,16 @@ const LabelPreview = ({
               className="hover:text-primary-foreground min-w-[130px]"
             >
               {isDownloading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating…
-                </>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
               ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" />
-                  Download
-                </>
+                <><Download className="mr-2 h-4 w-4" />Download</>
               )}
             </Button>
           </div>
         </div>
 
-        {/*
-          ── Label Render ─────────────────────────────────────────────
-          id="nutrition-label" is on this element only.
-          Everything below is excluded from PNG download.
-        */}
-        <div
-          id="nutrition-label"
-          className="flex justify-center bg-white rounded-lg"
-        >
+        {/* ── Label Render (download capture target) ────────────────── */}
+        <div id="nutrition-label" className="flex justify-center bg-white rounded-lg">
           {LabelComponent && <LabelComponent data={nutritionData} />}
         </div>
 
@@ -276,7 +244,6 @@ const LabelPreview = ({
                 <Badge variant="secondary">{format}</Badge>
               </div>
               <p className="text-gray-600">{labelInfo[format].description}</p>
-
               <div className="grid grid-cols-2 gap-4 mt-4">
                 <Card className="p-4">
                   <h4 className="font-medium mb-2">Download Format</h4>
@@ -297,14 +264,7 @@ const LabelPreview = ({
         <NutritionCharts data={nutritionData} />
       )}
 
-      {/*
-        ── Allergen Display (2.1) ────────────────────────────────────────
-        Always rendered when nutritionData exists.
-        AllergenDisplay handles its own empty/no-ingredient states internally.
-
-        hasIngredients=false → generator page prompt
-        hasIngredients=true  → full detection results
-      */}
+      {/* ── Allergen Detection (2.1) ──────────────────────────────────── */}
       {nutritionData && (
         <AllergenDisplay
           results={allergenResults}
@@ -312,10 +272,22 @@ const LabelPreview = ({
         />
       )}
 
+      {/*
+        ── Dietary Tag Detection (2.2) ───────────────────────────────────
+        Rendered below allergen panel.
+        DietaryTagDisplay returns null when hasIngredients=false,
+        so nothing renders on the generator page.
+      */}
+      {nutritionData && (
+        <DietaryTagDisplay
+          tags={dietaryTags}
+          hasIngredients={hasIngredients}
+        />
+      )}
+
       {/* ── Label Zoom Modal (1.6) ────────────────────────────────────── */}
       <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
         <Dialog.Portal>
-
           <Dialog.Overlay
             className={cn(
               'fixed inset-0 z-50 bg-black/70',
@@ -323,14 +295,12 @@ const LabelPreview = ({
               'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
             )}
           />
-
           <Dialog.Content
             className={cn(
               'fixed left-[50%] top-[50%] z-50',
               'translate-x-[-50%] translate-y-[-50%]',
               'w-[95vw] max-w-2xl max-h-[90vh]',
-              'bg-white rounded-xl shadow-2xl',
-              'flex flex-col',
+              'bg-white rounded-xl shadow-2xl flex flex-col',
               'data-[state=open]:animate-in data-[state=closed]:animate-out',
               'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
               'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
@@ -341,12 +311,9 @@ const LabelPreview = ({
           >
             <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <div className="flex items-center gap-3">
-                <Dialog.Title className="text-lg font-semibold">
-                  Label Preview
-                </Dialog.Title>
+                <Dialog.Title className="text-lg font-semibold">Label Preview</Dialog.Title>
                 <Badge variant="secondary">{format} Format</Badge>
               </div>
-
               <div className="flex items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -358,29 +325,18 @@ const LabelPreview = ({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     {(Object.keys(labelComponents) as LabelFormat[]).map((key) => (
-                      <DropdownMenuItem
-                        key={key}
-                        onClick={() => handleFormatChange(key)}
-                      >
+                      <DropdownMenuItem key={key} onClick={() => handleFormatChange(key)}>
                         {key} Format
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={downloadLabel}
-                  disabled={isDownloading}
-                >
-                  {isDownloading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Download className="h-3.5 w-3.5" />
-                  )}
+                <Button variant="outline" size="sm" onClick={downloadLabel} disabled={isDownloading}>
+                  {isDownloading
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Download className="h-3.5 w-3.5" />
+                  }
                 </Button>
-
                 <Dialog.Close asChild>
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                     <X className="h-4 w-4" />
@@ -403,10 +359,8 @@ const LabelPreview = ({
             <div className="px-6 py-3 border-t bg-gray-50 rounded-b-xl flex-shrink-0">
               <p className="text-xs text-gray-500 text-center">
                 Press{' '}
-                <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono">
-                  Esc
-                </kbd>{' '}
-                or click outside to close
+                <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono">Esc</kbd>
+                {' '}or click outside to close
               </p>
             </div>
           </Dialog.Content>
