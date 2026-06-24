@@ -1,17 +1,36 @@
-'use client';
-
 /**
  * ============================================================
  * Ingredient Builder Page
  * ============================================================
  *
- * ADDED (2.1): Pass `ingredients` prop to LabelPreview in Step 2
- *   so allergen detection runs against the actual recipe ingredients.
+ * ADDED (2.3):
+ *   NutritionScoreDisplay added to Step 2 LEFT column,
+ *   between Recipe Summary and Back button.
+ *   Receives perServingNutrition — correctly scaled per-serving data.
  *
- * All other logic preserved from 1.4 (toasts, edit, clear all).
- * Per-serving calculation preserved from 1.1.
+ * Step 2 layout (balanced):
+ *
+ *   Left column                Right column
+ *   ─────────────────          ─────────────────
+ *   Recipe Summary             LabelPreview
+ *   ─────────────────            └─ Label
+ *   NutritionScoreDisplay        └─ Charts
+ *     └─ Gauge                   └─ Allergens
+ *     └─ Breakdown               └─ Dietary Tags
+ *     └─ Suggestions
+ *   ─────────────────
+ *   Back button
+ *
+ * All previous features preserved:
+ *   - Per-serving calculation (1.1)
+ *   - Toast notifications (1.4)
+ *   - Ingredient edit/remove/clear (1.4)
+ *   - Allergen detection via ingredients prop (2.1)
+ *   - Dietary tags via ingredients prop (2.2)
  * ============================================================
  */
+
+'use client';
 
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -22,6 +41,7 @@ import { Label } from '@/components/ui/label';
 import { Trash2, ArrowRight, Pencil, Check, X } from 'lucide-react';
 import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingredient-search';
 import LabelPreview from '../components/nutrition-label/label-preview';
+import { NutritionScoreDisplay } from '../components/nutrition-score-display';
 import { calculateIngredientNutrition, convertToGrams } from '../lib/usda-api';
 import { RecipeIngredient } from '../types/recipe';
 import { NutritionData } from '../types/nutrition';
@@ -37,7 +57,7 @@ const NUTRIENT_KEYS: (keyof Omit<NutritionData, 'servingSize' | 'servingsPerCont
 ];
 
 // ─────────────────────────────────────────────
-// Per-Serving Calculator (from 1.1)
+// Per-Serving Calculator (1.1)
 // ─────────────────────────────────────────────
 
 function calculatePerServingNutrition(
@@ -97,7 +117,6 @@ export default function IngredientBuilder() {
     quantity: 0, unit: 'g',
   });
 
-  // Derived — never stored, always computed
   const perServingNutrition = calculatePerServingNutrition(
     recipe.ingredients, recipe.servingSize, recipe.servingsPerContainer
   );
@@ -130,8 +149,7 @@ export default function IngredientBuilder() {
       ingredients: prev.ingredients.filter((_, i) => i !== index),
     }));
     if (editingIndex === index) setEditingIndex(null);
-    const shortName = name.length > 30 ? name.slice(0, 30) + '…' : name;
-    toast.info(`Removed ${shortName}`);
+    toast.info(`Removed ${name.length > 30 ? name.slice(0, 30) + '…' : name}`);
   };
 
   const handleClearAll = () => {
@@ -168,7 +186,7 @@ export default function IngredientBuilder() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
 
-      {/* Header */}
+      {/* Header + Progress */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Ingredient Nutrition Builder</h1>
         <p className="text-gray-600">Create nutrition labels from your ingredients</p>
@@ -202,7 +220,9 @@ export default function IngredientBuilder() {
         </div>
       </div>
 
-      {/* ── Step 1 ──────────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════
+          STEP 1
+      ══════════════════════════════════════════════════════════════════ */}
       {activeStep === 1 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-6">
@@ -340,7 +360,7 @@ export default function IngredientBuilder() {
               </div>
             </Card>
 
-            {recipe.ingredients.length > 0 && recipe.name && recipe.servingSize > 0 && recipe.servingsPerContainer > 0 && (
+            {recipe.ingredients.length > 0 && recipe.name && recipe.servingSize > 0 && (
               <Button variant="default" className="w-full" onClick={() => setActiveStep(2)}>
                 Review & Generate
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -350,10 +370,16 @@ export default function IngredientBuilder() {
         </div>
       )}
 
-      {/* ── Step 2 ──────────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════
+          STEP 2 — Balanced two-column layout
+      ══════════════════════════════════════════════════════════════════ */}
       {activeStep === 2 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+          {/* ── Left column: Summary + Score + Back ───────────────────── */}
           <div className="space-y-6">
+
+            {/* Recipe metadata summary */}
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Recipe Summary</h2>
               <div className="space-y-4">
@@ -369,6 +395,7 @@ export default function IngredientBuilder() {
                     <div className="font-medium">{recipe.ingredients.length}</div>
                   </div>
                 </div>
+
                 <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                   Nutrition Per Serving ({recipe.servingSize}g)
                 </h3>
@@ -389,19 +416,23 @@ export default function IngredientBuilder() {
                 </div>
               </div>
             </Card>
+
+            {/*
+              Nutrition Quality Score — ADDED (2.3)
+              Left column, below recipe summary.
+              Uses correctly scaled per-serving nutrition.
+            */}
+            <NutritionScoreDisplay data={perServingNutrition} />
+
             <Button variant="outline" className="w-full" onClick={() => setActiveStep(1)}>
               Back to Ingredients
             </Button>
           </div>
 
-          <div className="space-y-6">
+          {/* ── Right column: Label + Charts + Allergens + Dietary Tags ── */}
+          <div className="lg:sticky lg:top-24">
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Nutrition Label Preview</h2>
-              {/*
-                ADDED (2.1): Pass ingredients to LabelPreview.
-                This enables allergen detection in the preview panel.
-                The allergen panel appears below the charts automatically.
-              */}
               <LabelPreview
                 nutritionData={perServingNutrition}
                 compact
@@ -410,6 +441,7 @@ export default function IngredientBuilder() {
               />
             </Card>
           </div>
+
         </div>
       )}
     </div>
