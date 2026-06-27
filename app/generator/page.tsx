@@ -3,39 +3,31 @@
  * Generator Page
  * ============================================================
  *
- * Manual nutrition entry flow.
+ * ADDED (2.4): "Save & Compare" button appears after label is generated.
+ * Saves current nutrition data to sessionStorage and navigates to /compare.
  *
- * Layout (balanced two-column dashboard):
- *
- *   Left column                Right column
- *   ─────────────────          ─────────────────
- *   NutritionForm              LabelPreview
- *   ─────────────────            └─ Label
- *   NutritionScoreDisplay        └─ Charts
- *     └─ Gauge                   └─ Allergens
- *     └─ Grade                   └─ Dietary Tags
- *     └─ Breakdown
- *     └─ Suggestions
- *
- * ADDED (2.3):
- *   NutritionScoreDisplay rendered in LEFT column below the form.
- *   Receives nutritionData directly — no ingredient dependency.
- *   Only renders after user submits the form.
+ * PRESERVED (2.3): NutritionScoreDisplay in left column
+ * PRESERVED (all): All existing functionality
  * ============================================================
  */
 
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { NutritionForm } from '../components/nutrition-form';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { saveProductForComparison } from '../lib/comparison';
 import { NutritionData } from '../types/nutrition';
-import { FileSpreadsheet, FileText, Image } from 'lucide-react';
+import { FileSpreadsheet, FileText, Image, GitCompare } from 'lucide-react';
 
 export default function Generator() {
+  const router = useRouter();
   const [nutritionData, setNutritionData] = useState<NutritionData | null>(null);
+  const [productName, setProductName] = useState('My Product');
 
   const steps = [
     {
@@ -55,6 +47,16 @@ export default function Generator() {
     },
   ];
 
+  /**
+   * handleSaveAndCompare
+   * Saves current product to sessionStorage and navigates to /compare.
+   */
+  const handleSaveAndCompare = () => {
+    if (!nutritionData) return;
+    saveProductForComparison(productName, nutritionData);
+    router.push('/compare');
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">
@@ -66,20 +68,46 @@ export default function Generator() {
         {/* ── Left Column ───────────────────────────────────────────────── */}
         <div className="space-y-6">
 
+          {/* Product name field — used when saving for comparison */}
+          {!nutritionData && (
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">
+                Product Name (optional)
+              </label>
+              <input
+                type="text"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value || 'My Product')}
+                placeholder="e.g. Whole Grain Bread"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          )}
+
           {/* Nutrition entry form */}
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Enter Nutrition Information</h2>
             <NutritionForm onSubmit={setNutritionData} />
           </Card>
 
-          {/*
-            Nutrition Quality Score — ADDED (2.3)
-            Rendered in left column beneath the form.
-            Only appears after user submits nutrition data.
-            Balances the tall right-column label preview.
-          */}
+          {/* Nutrition Quality Score + Compare button */}
           {nutritionData && (
-            <NutritionScoreDisplay data={nutritionData} />
+            <>
+              <NutritionScoreDisplay data={nutritionData} />
+
+              {/*
+                Save & Compare button — ADDED (2.4)
+                Saves product to sessionStorage and navigates to /compare.
+              */}
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={handleSaveAndCompare}
+              >
+                <GitCompare className="w-4 h-4" />
+                Save & Compare with Another Product
+              </Button>
+            </>
           )}
         </div>
 
@@ -88,7 +116,6 @@ export default function Generator() {
           {nutritionData ? (
             <LabelPreview nutritionData={nutritionData} />
           ) : (
-            /* Empty state before form submission */
             <Card className="p-6">
               <div className="space-y-8">
                 <div className="text-center">
@@ -118,7 +145,6 @@ export default function Generator() {
                     ))}
                   </div>
 
-                  {/* Sample label placeholders */}
                   <div className="mt-8 grid grid-cols-3 gap-4">
                     {['US', 'EU', 'INDIA'].map((fmt) => (
                       <div
