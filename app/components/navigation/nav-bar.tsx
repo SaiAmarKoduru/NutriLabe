@@ -1,3 +1,13 @@
+/**
+ * ============================================================
+ * Navigation Bar
+ * ============================================================
+ *
+ * ADDED (2.4): /compare route added to navigation.
+ * All other functionality preserved.
+ * ============================================================
+ */
+
 "use client";
 
 import Link from "next/link";
@@ -24,6 +34,10 @@ const routes = [
   {
     label: "Ingredient Builder",
     href: "/ingredient-builder",
+  },
+  {
+    label: "Compare",
+    href: "/compare",
   },
 ];
 
@@ -55,11 +69,6 @@ export function NavBar() {
                 {route.label}
               </Link>
             ))}
-            {/* <Button asChild>
-              <Link href="/generator">
-                Create Label
-              </Link>
-            </Button> */}
           </nav>
 
           {/* Mobile Navigation */}
@@ -87,11 +96,6 @@ export function NavBar() {
                     {route.label}
                   </Link>
                 ))}
-                {/* <Button asChild className="mt-2">
-                  <Link href="/generator" onClick={() => setIsOpen(false)}>
-                    Create Label
-                  </Link>
-                </Button> */}
               </nav>
             </SheetContent>
           </Sheet>
