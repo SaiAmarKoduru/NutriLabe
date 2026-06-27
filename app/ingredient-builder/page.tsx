@@ -3,45 +3,32 @@
  * Ingredient Builder Page
  * ============================================================
  *
- * ADDED (2.3):
- *   NutritionScoreDisplay added to Step 2 LEFT column,
- *   between Recipe Summary and Back button.
- *   Receives perServingNutrition — correctly scaled per-serving data.
+ * ADDED (2.4): "Save & Compare" button in Step 2 left column,
+ * below the Nutrition Quality Score.
+ * Saves perServingNutrition + recipe name to sessionStorage
+ * and navigates to /compare.
  *
- * Step 2 layout (balanced):
- *
- *   Left column                Right column
- *   ─────────────────          ─────────────────
- *   Recipe Summary             LabelPreview
- *   ─────────────────            └─ Label
- *   NutritionScoreDisplay        └─ Charts
- *     └─ Gauge                   └─ Allergens
- *     └─ Breakdown               └─ Dietary Tags
- *     └─ Suggestions
- *   ─────────────────
- *   Back button
- *
- * All previous features preserved:
- *   - Per-serving calculation (1.1)
- *   - Toast notifications (1.4)
- *   - Ingredient edit/remove/clear (1.4)
- *   - Allergen detection via ingredients prop (2.1)
- *   - Dietary tags via ingredients prop (2.2)
+ * PRESERVED (2.3): NutritionScoreDisplay in left column
+ * PRESERVED (2.2): Dietary tags via ingredients prop
+ * PRESERVED (2.1): Allergen detection via ingredients prop
+ * PRESERVED (all): All existing functionality
  * ============================================================
  */
 
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Trash2, ArrowRight, Pencil, Check, X } from 'lucide-react';
+import { Trash2, ArrowRight, Pencil, Check, X, GitCompare } from 'lucide-react';
 import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingredient-search';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { saveProductForComparison } from '../lib/comparison';
 import { calculateIngredientNutrition, convertToGrams } from '../lib/usda-api';
 import { RecipeIngredient } from '../types/recipe';
 import { NutritionData } from '../types/nutrition';
@@ -104,6 +91,8 @@ function calculatePerServingNutrition(
 // ─────────────────────────────────────────────
 
 export default function IngredientBuilder() {
+  const router = useRouter();
+
   const [recipe, setRecipe] = useState({
     name: '',
     servingSize: 0,
@@ -181,6 +170,15 @@ export default function IngredientBuilder() {
 
   const handleCancelEdit = () => setEditingIndex(null);
 
+  /**
+   * handleSaveAndCompare — ADDED (2.4)
+   * Saves per-serving nutrition + recipe name and navigates to /compare.
+   */
+  const handleSaveAndCompare = () => {
+    saveProductForComparison(recipe.name || 'My Recipe', perServingNutrition);
+    router.push('/compare');
+  };
+
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
@@ -220,9 +218,7 @@ export default function IngredientBuilder() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          STEP 1
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── Step 1 ──────────────────────────────────────────────────────── */}
       {activeStep === 1 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-6">
@@ -370,16 +366,12 @@ export default function IngredientBuilder() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          STEP 2 — Balanced two-column layout
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── Step 2 ──────────────────────────────────────────────────────── */}
       {activeStep === 2 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-          {/* ── Left column: Summary + Score + Back ───────────────────── */}
+          {/* Left column */}
           <div className="space-y-6">
-
-            {/* Recipe metadata summary */}
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Recipe Summary</h2>
               <div className="space-y-4">
@@ -395,7 +387,6 @@ export default function IngredientBuilder() {
                     <div className="font-medium">{recipe.ingredients.length}</div>
                   </div>
                 </div>
-
                 <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                   Nutrition Per Serving ({recipe.servingSize}g)
                 </h3>
@@ -417,19 +408,28 @@ export default function IngredientBuilder() {
               </div>
             </Card>
 
-            {/*
-              Nutrition Quality Score — ADDED (2.3)
-              Left column, below recipe summary.
-              Uses correctly scaled per-serving nutrition.
-            */}
+            {/* Nutrition Quality Score */}
             <NutritionScoreDisplay data={perServingNutrition} />
+
+            {/*
+              Save & Compare button — ADDED (2.4)
+              Saves recipe and navigates to /compare.
+            */}
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={handleSaveAndCompare}
+            >
+              <GitCompare className="w-4 h-4" />
+              Save & Compare with Another Product
+            </Button>
 
             <Button variant="outline" className="w-full" onClick={() => setActiveStep(1)}>
               Back to Ingredients
             </Button>
           </div>
 
-          {/* ── Right column: Label + Charts + Allergens + Dietary Tags ── */}
+          {/* Right column */}
           <div className="lg:sticky lg:top-24">
             <Card className="p-6">
               <h2 className="text-xl font-semibold mb-4">Nutrition Label Preview</h2>
@@ -441,7 +441,6 @@ export default function IngredientBuilder() {
               />
             </Card>
           </div>
-
         </div>
       )}
     </div>
