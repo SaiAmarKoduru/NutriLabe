@@ -1,10 +1,17 @@
 /**
  * ============================================================
- * Generator Page
+ * Generator Page — Compare Mode Aware
  * ============================================================
  *
- * ADDED (2.4): "Save & Compare" button appears after label is generated.
- * Saves current nutrition data to sessionStorage and navigates to /compare.
+ * ADDED (2.4 fix): Detects ?mode=compare_b in URL.
+ *
+ * Normal mode (no query param):
+ *   - "Save & Compare" button saves as Product A → /compare
+ *
+ * Compare mode (?mode=compare_b):
+ *   - Banner shown: "You are creating Product B for comparison"
+ *   - "Save as Product B & Return" button saves as Product B → /compare
+ *   - All other functionality identical — zero UI changes
  *
  * PRESERVED (2.3): NutritionScoreDisplay in left column
  * PRESERVED (all): All existing functionality
@@ -14,20 +21,30 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { NutritionForm } from '../components/nutrition-form';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
-import { saveProductForComparison } from '../lib/comparison';
+import { saveProductA, saveProductB } from '../lib/comparison';
 import { NutritionData } from '../types/nutrition';
-import { FileSpreadsheet, FileText, Image, GitCompare } from 'lucide-react';
+import { FileSpreadsheet, FileText, Image, GitCompare, ArrowLeft } from 'lucide-react';
 
 export default function Generator() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  /**
+   * compareMode — true when navigated from /compare to create Product B.
+   * Detected via ?mode=compare_b query parameter.
+   */
+  const compareMode = searchParams.get('mode') === 'compare_b';
+
   const [nutritionData, setNutritionData] = useState<NutritionData | null>(null);
-  const [productName, setProductName] = useState('My Product');
+  const [productName, setProductName] = useState(
+    compareMode ? 'Product B' : 'My Product'
+  );
 
   const steps = [
     {
@@ -48,19 +65,63 @@ export default function Generator() {
   ];
 
   /**
-   * handleSaveAndCompare
-   * Saves current product to sessionStorage and navigates to /compare.
+   * handleSaveAsProductA
+   * Normal mode: save as Product A and navigate to /compare.
    */
-  const handleSaveAndCompare = () => {
+  const handleSaveAsProductA = () => {
     if (!nutritionData) return;
-    saveProductForComparison(productName, nutritionData);
+    saveProductA(productName, nutritionData, 'generator');
+    router.push('/compare');
+  };
+
+  /**
+   * handleSaveAsProductB
+   * Compare mode: save as Product B and return to /compare.
+   */
+  const handleSaveAsProductB = () => {
+    if (!nutritionData) return;
+    saveProductB(productName, nutritionData, 'generator');
     router.push('/compare');
   };
 
   return (
     <div className="container mx-auto px-4 py-8">
+
+      {/*
+        ── Compare Mode Banner ──────────────────────────────────────────
+        Shown only when ?mode=compare_b is in the URL.
+        Reminds user they are creating Product B for comparison.
+      */}
+      {compareMode && (
+        <div className="mb-6 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-5 py-3">
+          <div className="flex items-center gap-3">
+            <GitCompare className="w-5 h-5 text-blue-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-blue-800">
+                Creating Product B for Comparison
+              </p>
+              <p className="text-xs text-blue-600">
+                Fill in the nutrition values below, then click "Save as Product B & Return".
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push('/compare')}
+            className="text-blue-600 hover:text-blue-800 hover:bg-blue-100 flex-shrink-0"
+          >
+            <ArrowLeft className="w-4 h-4 mr-1.5" />
+            Back to Compare
+          </Button>
+        </div>
+      )}
+
       <h1 className="text-3xl font-bold mb-8">
-        Ingredient Based Nutrition Label Generator
+        {compareMode
+          ? 'Nutrition Generator — Product B'
+          : 'Ingredient Based Nutrition Label Generator'
+        }
       </h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
@@ -68,45 +129,56 @@ export default function Generator() {
         {/* ── Left Column ───────────────────────────────────────────────── */}
         <div className="space-y-6">
 
-          {/* Product name field — used when saving for comparison */}
-          {!nutritionData && (
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">
-                Product Name (optional)
-              </label>
-              <input
-                type="text"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value || 'My Product')}
-                placeholder="e.g. Whole Grain Bread"
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          )}
+          {/* Product name field */}
+          <div>
+            <label className="text-sm font-medium text-gray-700 block mb-1">
+              Product Name {compareMode ? '(Product B)' : '(optional)'}
+            </label>
+            <input
+              type="text"
+              value={productName}
+              onChange={(e) => setProductName(e.target.value || (compareMode ? 'Product B' : 'My Product'))}
+              placeholder={compareMode ? 'e.g. Whole Grain Bread' : 'e.g. My Product'}
+              className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
 
-          {/* Nutrition entry form */}
+          {/* Nutrition form */}
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Enter Nutrition Information</h2>
             <NutritionForm onSubmit={setNutritionData} />
           </Card>
 
-          {/* Nutrition Quality Score + Compare button */}
+          {/* Score + action buttons — shown after label generated */}
           {nutritionData && (
             <>
               <NutritionScoreDisplay data={nutritionData} />
 
-              {/*
-                Save & Compare button — ADDED (2.4)
-                Saves product to sessionStorage and navigates to /compare.
-              */}
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={handleSaveAndCompare}
-              >
-                <GitCompare className="w-4 h-4" />
-                Save & Compare with Another Product
-              </Button>
+              {compareMode ? (
+                /*
+                  Compare mode: single action — save as Product B and return.
+                  Button is prominent since this is the primary CTA.
+                */
+                <Button
+                  className="w-full gap-2"
+                  onClick={handleSaveAsProductB}
+                >
+                  <GitCompare className="w-4 h-4" />
+                  Save as Product B & Return to Comparison
+                </Button>
+              ) : (
+                /*
+                  Normal mode: save as Product A for comparison.
+                */
+                <Button
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={handleSaveAsProductA}
+                >
+                  <GitCompare className="w-4 h-4" />
+                  Save & Compare with Another Product
+                </Button>
+              )}
             </>
           )}
         </div>
