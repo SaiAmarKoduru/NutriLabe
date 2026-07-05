@@ -3,37 +3,28 @@
  * Label Preview Component
  * ============================================================
  *
- * ADDED (2.5): Serving Size Scaling Slider
+ * ADDED (2.6): PDF Export
+ *   - New "Export PDF" button in toolbar beside Download (PNG)
+ *   - Uses generateLabelPdf() from app/lib/pdf-generator.ts
+ *   - Captures id="nutrition-label" element (same as PNG)
+ *   - Always exports original nutritionData (unaffected by slider)
+ *   - Toast notifications for all PDF lifecycle events
+ *   - Separate loading state from PNG download (both can coexist)
  *
- *   An interactive slider below the label that lets users scale
- *   the displayed serving size from 0.25× to 3× of the original.
- *   All nutrient values in the label and charts update in real time.
- *
- *   Key design decisions:
- *   - Original `nutritionData` prop is NEVER mutated — it is the
- *     immutable source of truth from the parent
- *   - `scaledNutrition` is derived purely from nutritionData × scale
- *   - Download ALWAYS uses original nutritionData (unaffected)
- *   - Modal ALWAYS shows original nutritionData (unaffected)
- *   - Charts receive scaledNutrition so they update with the slider
- *   - Allergens/dietary tags are ingredient-based — unaffected
- *   - Reset button returns slider to 1× instantly
- *   - Slider only shown when nutritionData.servingSize > 0
- *
+ * PRESERVED (2.5): Serving size scaling slider
  * PRESERVED (2.2): Dietary tag display
  * PRESERVED (2.1): Allergen display
  * PRESERVED (1.7): Nutrition charts
  * PRESERVED (1.6): Label zoom modal
  * PRESERVED (1.4): Toast notifications, download loading state
- * PRESERVED (all): id="nutrition-label", all formats, 300 DPI export
+ * PRESERVED (all): id="nutrition-label", all formats, 300 DPI PNG
  * ============================================================
  */
 
 'use client';
 
-import { LabelFormat } from '@/app/types/nutrition';
+import { LabelFormat, NutritionData } from '@/app/types/nutrition';
 import { RecipeIngredient } from '@/app/types/recipe';
-import { NutritionData } from '@/app/types/nutrition';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -49,6 +40,7 @@ import {
   ZoomIn,
   X,
   RotateCcw,
+  FileText,
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -63,6 +55,7 @@ import { AllergenDisplay } from './allergen-display';
 import { DietaryTagDisplay } from './dietary-tag-display';
 import { detectAllergens } from '@/app/lib/allergens';
 import { detectDietaryTags } from '@/app/lib/dietary-tags';
+import { generateLabelPdf } from '@/app/lib/pdf-generator';
 import * as htmlToImage from 'html-to-image';
 import { labelInfo } from '@/app/labelInfo';
 import { cn } from '@/lib/utils';
@@ -70,24 +63,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 // ─────────────────────────────────────────────
-// Constants
+// Constants (from 2.5)
 // ─────────────────────────────────────────────
 
-/** Minimum scale multiplier (0.25× = quarter serving) */
 const SCALE_MIN = 0.25;
-
-/** Maximum scale multiplier (3× = triple serving) */
 const SCALE_MAX = 3;
-
-/** Slider step — 0.25 increments for clean values */
 const SCALE_STEP = 0.25;
 
-/**
- * NUTRIENT_SCALE_KEYS
- * Keys in NutritionData that should be scaled proportionally.
- * servingSize scales with the multiplier.
- * servingsPerContainer is metadata — never scaled.
- */
 const NUTRIENT_SCALE_KEYS: (keyof NutritionData)[] = [
   'calories', 'totalFat', 'saturatedFat', 'transFat', 'cholesterol',
   'sodium', 'totalCarbohydrates', 'dietaryFiber', 'sugars', 'protein',
@@ -122,29 +104,15 @@ const labelComponents: Record<LabelFormat, React.ComponentType<{ data: any }>> =
 };
 
 // ─────────────────────────────────────────────
-// Pure Scaling Function
+// Scaling Utility (from 2.5)
 // ─────────────────────────────────────────────
 
-/**
- * scaleNutrition
- *
- * Returns a new NutritionData object with all nutrient values
- * multiplied by the given scale factor.
- *
- * Original data is never mutated.
- * servingsPerContainer is intentionally NOT scaled — it is a
- * container-level property, not a per-serving nutrient.
- *
- * @param data  - Original per-serving NutritionData
- * @param scale - Multiplier (e.g. 2.0 = double serving)
- * @returns New NutritionData with scaled values
- */
 function scaleNutrition(data: NutritionData, scale: number): NutritionData {
   const scaled = { ...data };
   for (const key of NUTRIENT_SCALE_KEYS) {
     const value = data[key as keyof NutritionData];
     if (typeof value === 'number') {
-      scaled[key as keyof NutritionData] = Math.round(value * scale * 100) / 100 as any;
+      (scaled as any)[key] = Math.round(value * scale * 100) / 100;
     }
   }
   return scaled;
@@ -168,50 +136,19 @@ const LabelPreview = ({
   // ── State ─────────────────────────────────────────────────────────────
   const [format, setFormat] = useState<LabelFormat>(defaultFormat);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  /**
-   * scale — the current serving size multiplier.
-   * 1.0 = original serving size (default, no change).
-   * Changed by the slider UI below the label.
-   */
   const [scale, setScale] = useState(1.0);
 
   // ── Derived Values ────────────────────────────────────────────────────
-
-  /**
-   * scaledNutrition
-   *
-   * Derived from original nutritionData × current scale.
-   * Memoized — only recomputes when nutritionData or scale changes.
-   * This is what the label, charts, and summary panels display.
-   *
-   * The original nutritionData is ALWAYS preserved for download.
-   */
   const scaledNutrition = useMemo(
     () => scaleNutrition(nutritionData, scale),
     [nutritionData, scale]
   );
-
-  /**
-   * isScaled — true when slider is not at default (1×).
-   * Used to show/hide the reset button.
-   */
   const isScaled = scale !== 1.0;
-
-  /**
-   * originalServingSize — used in slider labels.
-   */
   const originalServingSize = Number(nutritionData?.servingSize) || 100;
-
-  /**
-   * currentServingSize — actual serving size at current scale.
-   */
   const currentServingSize = Math.round(originalServingSize * scale);
 
-  // ── Memoized Detections ───────────────────────────────────────────────
-  // Allergen and dietary tag detection uses original ingredients —
-  // these are not affected by serving size scaling.
   const allergenResults = useMemo(
     () => detectAllergens(ingredients ?? []),
     [ingredients]
@@ -230,20 +167,17 @@ const LabelPreview = ({
   };
 
   /**
-   * downloadLabel
-   *
-   * ALWAYS downloads using original nutritionData (scale = 1×).
-   * The downloaded PNG reflects the actual product nutrition,
-   * not a scaled preview. This is intentional and correct for
-   * regulatory label purposes.
+   * downloadPng
+   * Captures id="nutrition-label" at 300 DPI as PNG.
+   * Always uses original nutritionData regardless of slider.
    */
-  const downloadLabel = async () => {
+  const downloadPng = async () => {
     const element = document.getElementById('nutrition-label');
     if (!element) { toast.error('Label element not found. Please try again.'); return; }
     if (isDownloading) return;
 
     setIsDownloading(true);
-    const loadingToastId = toast.loading('Generating high-resolution label…');
+    const loadingToastId = toast.loading('Generating PNG label…');
 
     try {
       const scaleFactor = 300 / 96;
@@ -266,13 +200,57 @@ const LabelPreview = ({
       link.click();
 
       toast.dismiss(loadingToastId);
-      toast.success(`Label downloaded as ${filename}`);
+      toast.success(`PNG downloaded: ${filename}`);
     } catch (error) {
       toast.dismiss(loadingToastId);
-      toast.error('Failed to generate label image. Please try again.');
-      console.error('Label download error:', error);
+      toast.error('Failed to generate PNG. Please try again.');
+      console.error('PNG download error:', error);
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  /**
+   * downloadPdf — ADDED (2.6)
+   *
+   * Captures id="nutrition-label" and generates a PDF.
+   * Always uses original nutritionData (unaffected by slider).
+   * Uses generateLabelPdf() from app/lib/pdf-generator.ts.
+   *
+   * Separate loading state from PNG so both buttons work independently.
+   */
+  const downloadPdf = async () => {
+    const element = document.getElementById('nutrition-label');
+    if (!element) { toast.error('Label element not found. Please try again.'); return; }
+    if (isExportingPdf) return;
+
+    setIsExportingPdf(true);
+    const loadingToastId = toast.loading('Generating PDF label…');
+
+    try {
+      const filename = `nutrition-label-${format.toLowerCase()}-${Date.now()}`;
+      const title = `Nutrition Label — ${format} Format`;
+
+      const result = await generateLabelPdf({
+        element,
+        filename,
+        title,
+        scale: 2, // 192 DPI — good balance of quality vs file size
+      });
+
+      toast.dismiss(loadingToastId);
+
+      if (result.success) {
+        toast.success(`PDF downloaded: ${filename}.pdf`);
+      } else {
+        toast.error(`PDF generation failed: ${result.error}`);
+      }
+    } catch (error) {
+      toast.dismiss(loadingToastId);
+      toast.error('Failed to generate PDF. Please try again.');
+      console.error('PDF export error:', error);
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -285,7 +263,8 @@ const LabelPreview = ({
       <Card className="p-2 border-none">
 
         {/* ── Toolbar ───────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
+          {/* Format selector */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2 hover:text-primary-foreground">
@@ -303,7 +282,9 @@ const LabelPreview = ({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="flex items-center gap-2">
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Full Size modal */}
             <Button
               variant="outline"
               onClick={() => setIsModalOpen(true)}
@@ -314,16 +295,37 @@ const LabelPreview = ({
               Full Size
             </Button>
 
+            {/* PNG Download */}
             <Button
-              onClick={downloadLabel}
+              onClick={downloadPng}
               variant="outline"
-              disabled={isDownloading}
-              className="hover:text-primary-foreground min-w-[130px]"
+              disabled={isDownloading || isExportingPdf}
+              className="hover:text-primary-foreground min-w-[110px]"
+              title="Download as PNG (300 DPI)"
             >
               {isDownloading ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />PNG…</>
               ) : (
-                <><Download className="mr-2 h-4 w-4" />Download</>
+                <><Download className="mr-2 h-4 w-4" />PNG</>
+              )}
+            </Button>
+
+            {/*
+              PDF Export Button — ADDED (2.6)
+              Separate loading state from PNG.
+              Uses FileText icon to distinguish from PNG download.
+            */}
+            <Button
+              onClick={downloadPdf}
+              variant="outline"
+              disabled={isDownloading || isExportingPdf}
+              className="hover:text-primary-foreground min-w-[110px]"
+              title="Export as PDF (A4)"
+            >
+              {isExportingPdf ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />PDF…</>
+              ) : (
+                <><FileText className="mr-2 h-4 w-4" />PDF</>
               )}
             </Button>
           </div>
@@ -331,14 +333,8 @@ const LabelPreview = ({
 
         {/*
           ── Label Render ─────────────────────────────────────────────
-          id="nutrition-label" is on this element only.
-          The label receives ORIGINAL nutritionData — not scaled.
-          Download captures this element, so downloaded PNG always
-          shows the true product nutrition at original serving size.
-
-          NOTE: We intentionally render original data here so the
-          downloadable label is always regulatory-accurate.
-          The slider affects charts and the summary panel only.
+          id="nutrition-label" — captured by BOTH PNG and PDF export.
+          Always renders original nutritionData (not scaled).
         */}
         <div
           id="nutrition-label"
@@ -347,29 +343,18 @@ const LabelPreview = ({
           {LabelComponent && <LabelComponent data={nutritionData} />}
         </div>
 
-        {/*
-          ── Serving Size Scaling Slider — ADDED (2.5) ─────────────────
-          Shown only when nutritionData has a valid serving size.
-          Renders BELOW the label card, above charts.
-          Affects charts and nutrient summaries — not the label PNG.
-        */}
+        {/* ── Serving Size Scaling Slider (2.5) ─────────────────────── */}
         {originalServingSize > 0 && (
           <div className="mt-6 pt-5 border-t">
             <div className="space-y-3">
-
-              {/* Slider header */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-gray-700">
-                    Serving Size Preview
-                  </p>
+                  <p className="text-sm font-semibold text-gray-700">Serving Size Preview</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     Adjust to see how nutrients change per serving
                   </p>
                 </div>
-
                 <div className="flex items-center gap-2">
-                  {/* Current serving size pill */}
                   <div className={cn(
                     'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
                     isScaled
@@ -383,15 +368,12 @@ const LabelPreview = ({
                       </span>
                     )}
                   </div>
-
-                  {/* Reset button — only shown when scaled */}
                   {isScaled && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setScale(1.0)}
                       className="h-7 px-2 text-xs text-gray-500 hover:text-gray-700"
-                      title="Reset to original serving size"
                     >
                       <RotateCcw className="w-3 h-3 mr-1" />
                       Reset
@@ -400,12 +382,10 @@ const LabelPreview = ({
                 </div>
               </div>
 
-              {/* The slider input */}
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400 w-10 text-right flex-shrink-0">
                   {Math.round(originalServingSize * SCALE_MIN)}g
                 </span>
-
                 <input
                   type="range"
                   min={SCALE_MIN}
@@ -414,29 +394,23 @@ const LabelPreview = ({
                   value={scale}
                   onChange={(e) => setScale(parseFloat(e.target.value))}
                   className="flex-1 h-2 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  aria-label={`Serving size: ${currentServingSize}g (${scale}× original)`}
+                  aria-label={`Serving size: ${currentServingSize}g`}
                 />
-
                 <span className="text-xs text-gray-400 w-10 flex-shrink-0">
                   {Math.round(originalServingSize * SCALE_MAX)}g
                 </span>
               </div>
 
-              {/* Scale markers */}
               <div className="flex justify-between px-10 text-xs text-gray-400">
                 <span>¼×</span>
                 <span>½×</span>
-                <span className={cn(
-                  'font-medium transition-colors',
-                  !isScaled ? 'text-blue-500' : 'text-gray-400'
-                )}>
+                <span className={cn('font-medium', !isScaled ? 'text-blue-500' : 'text-gray-400')}>
                   1× original
                 </span>
                 <span>2×</span>
                 <span>3×</span>
               </div>
 
-              {/* Scaled calorie summary — quick reference */}
               {isScaled && (
                 <div className="flex items-center justify-center gap-6 bg-blue-50 rounded-lg py-2.5 px-4 mt-1">
                   <div className="text-center">
@@ -472,9 +446,8 @@ const LabelPreview = ({
                 </div>
               )}
 
-              {/* Disclaimer */}
               <p className="text-xs text-gray-400 text-center">
-                Preview only — the downloaded label always reflects the original serving size.
+                Preview only — downloaded PNG and PDF always reflect the original serving size.
               </p>
             </div>
           </div>
@@ -491,12 +464,12 @@ const LabelPreview = ({
               <p className="text-gray-600">{labelInfo[format].description}</p>
               <div className="grid grid-cols-2 gap-4 mt-4">
                 <Card className="p-4">
-                  <h4 className="font-medium mb-2">Download Format</h4>
-                  <p className="text-sm text-gray-500">PNG with transparent background</p>
+                  <h4 className="font-medium mb-2">Export Formats</h4>
+                  <p className="text-sm text-gray-500">PNG (300 DPI) · PDF (A4)</p>
                 </Card>
                 <Card className="p-4">
                   <h4 className="font-medium mb-2">Resolution</h4>
-                  <p className="text-sm text-gray-500">300 DPI for print-ready quality</p>
+                  <p className="text-sm text-gray-500">Print-ready quality</p>
                 </Card>
               </div>
             </div>
@@ -504,56 +477,41 @@ const LabelPreview = ({
         )}
       </Card>
 
-      {/*
-        ── Nutrition Charts (1.7) ────────────────────────────────────────
-        Receives scaledNutrition so charts update with slider.
-        When scale = 1.0, scaledNutrition === nutritionData (identical).
-      */}
+      {/* ── Nutrition Charts (1.7) — receives scaledNutrition ────────── */}
       {showCharts && nutritionData && (
         <NutritionCharts data={scaledNutrition} />
       )}
 
       {/* ── Allergen Detection (2.1) ──────────────────────────────────── */}
       {nutritionData && (
-        <AllergenDisplay
-          results={allergenResults}
-          hasIngredients={hasIngredients}
-        />
+        <AllergenDisplay results={allergenResults} hasIngredients={hasIngredients} />
       )}
 
       {/* ── Dietary Tag Detection (2.2) ───────────────────────────────── */}
       {nutritionData && (
-        <DietaryTagDisplay
-          tags={dietaryTags}
-          hasIngredients={hasIngredients}
-        />
+        <DietaryTagDisplay tags={dietaryTags} hasIngredients={hasIngredients} />
       )}
 
       {/* ── Label Zoom Modal (1.6) ────────────────────────────────────── */}
-      {/* Modal always shows original nutritionData — not scaled */}
       <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
         <Dialog.Portal>
-          <Dialog.Overlay
-            className={cn(
-              'fixed inset-0 z-50 bg-black/70',
-              'data-[state=open]:animate-in data-[state=closed]:animate-out',
-              'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
-            )}
-          />
-          <Dialog.Content
-            className={cn(
-              'fixed left-[50%] top-[50%] z-50',
-              'translate-x-[-50%] translate-y-[-50%]',
-              'w-[95vw] max-w-2xl max-h-[90vh]',
-              'bg-white rounded-xl shadow-2xl flex flex-col',
-              'data-[state=open]:animate-in data-[state=closed]:animate-out',
-              'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-              'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-              'data-[state=closed]:slide-out-to-left-1/2 data-[state=open]:slide-in-from-left-1/2',
-              'data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-top-[48%]',
-              'duration-200'
-            )}
-          >
+          <Dialog.Overlay className={cn(
+            'fixed inset-0 z-50 bg-black/70',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
+          )} />
+          <Dialog.Content className={cn(
+            'fixed left-[50%] top-[50%] z-50',
+            'translate-x-[-50%] translate-y-[-50%]',
+            'w-[95vw] max-w-2xl max-h-[90vh]',
+            'bg-white rounded-xl shadow-2xl flex flex-col',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+            'data-[state=closed]:slide-out-to-left-1/2 data-[state=open]:slide-in-from-left-1/2',
+            'data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-top-[48%]',
+            'duration-200'
+          )}>
             <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <div className="flex items-center gap-3">
                 <Dialog.Title className="text-lg font-semibold">Label Preview</Dialog.Title>
@@ -576,12 +534,23 @@ const LabelPreview = ({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button variant="outline" size="sm" onClick={downloadLabel} disabled={isDownloading}>
+
+                {/* PNG in modal */}
+                <Button variant="outline" size="sm" onClick={downloadPng} disabled={isDownloading}>
                   {isDownloading
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : <Download className="h-3.5 w-3.5" />
                   }
                 </Button>
+
+                {/* PDF in modal */}
+                <Button variant="outline" size="sm" onClick={downloadPdf} disabled={isExportingPdf}>
+                  {isExportingPdf
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <FileText className="h-3.5 w-3.5" />
+                  }
+                </Button>
+
                 <Dialog.Close asChild>
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                     <X className="h-4 w-4" />
@@ -611,7 +580,6 @@ const LabelPreview = ({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-
     </div>
   );
 };
