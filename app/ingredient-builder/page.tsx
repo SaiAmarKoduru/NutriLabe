@@ -1,12 +1,12 @@
 /**
- * Ingredient Builder Page — with AI Ingredient Explanation (3.1)
- * Added: IngredientExplanationButton next to each ingredient's edit/remove buttons
- * Added: IngredientExplanationButton next to selected ingredient in search component
+ * Ingredient Builder Page — with AI Nutrition Summary (3.2)
+ * Added: NutritionSummaryDisplay in Step 2 left column below NutritionScoreDisplay.
+ * Passes dietaryTags and allergens derived from ingredients for richer summary context.
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
@@ -17,9 +17,12 @@ import { Trash2, ArrowRight, Pencil, Check, X, GitCompare, ArrowLeft } from 'luc
 import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingredient-search';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
 import { IngredientExplanationButton } from '../components/ingredient-explanation';
 import { saveProductA, saveProductB } from '../lib/comparison';
 import { calculateIngredientNutrition, convertToGrams } from '../lib/usda-api';
+import { detectAllergens } from '../lib/allergens';
+import { detectDietaryTags, getDetectedTags } from '../lib/dietary-tags';
 import { RecipeIngredient } from '../types/recipe';
 import { NutritionData } from '../types/nutrition';
 
@@ -46,9 +49,7 @@ function calculatePerServingNutrition(
   for (const ingredient of ingredients) {
     const weightGrams = convertToGrams(ingredient.quantity, ingredient.unit);
     totalWeightGrams += weightGrams;
-    const contribution = calculateIngredientNutrition(
-      ingredient.nutritionPer100g, ingredient.quantity, ingredient.unit
-    );
+    const contribution = calculateIngredientNutrition(ingredient.nutritionPer100g, ingredient.quantity, ingredient.unit);
     for (const key of NUTRIENT_KEYS) totals[key] += (contribution[key] ?? 0);
   }
   if (totalWeightGrams === 0) return zero;
@@ -80,12 +81,18 @@ export default function IngredientBuilder() {
     recipe.ingredients, recipe.servingSize, recipe.servingsPerContainer
   );
 
+  // Derive tag/allergen labels for AI summary context
+  const detectedAllergenNames = useMemo(
+    () => detectAllergens(recipe.ingredients).map((r) => r.allergen.name),
+    [recipe.ingredients]
+  );
+  const detectedTagLabels = useMemo(
+    () => getDetectedTags(detectDietaryTags(recipe.ingredients)).map((t) => t.label),
+    [recipe.ingredients]
+  );
+
   const steps = [
-    {
-      number: 1, title: 'Add Recipe & Ingredients',
-      description: 'Enter recipe details and add ingredients',
-      isComplete: recipe.name !== '' && recipe.servingSize > 0 && recipe.ingredients.length > 0,
-    },
+    { number: 1, title: 'Add Recipe & Ingredients', description: 'Enter recipe details and add ingredients', isComplete: recipe.name !== '' && recipe.servingSize > 0 && recipe.ingredients.length > 0 },
     { number: 2, title: 'Review & Generate', description: 'Review nutrition facts and generate label', isComplete: false },
   ];
 
@@ -166,14 +173,11 @@ export default function IngredientBuilder() {
         </p>
         <div className="grid grid-cols-2 gap-4 mt-6">
           {steps.map((step) => (
-            <button
-              key={step.number}
-              onClick={() => setActiveStep(step.number)}
+            <button key={step.number} onClick={() => setActiveStep(step.number)}
               className={`p-4 rounded-lg border-2 transition-all text-left ${
                 activeStep === step.number ? 'border-blue-500 bg-blue-50'
                 : step.isComplete ? 'border-green-200 bg-green-50' : 'border-gray-200'
-              }`}
-            >
+              }`}>
               <div className="flex items-center gap-3">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                   activeStep === step.number ? 'bg-blue-500 text-white'
@@ -268,14 +272,11 @@ export default function IngredientBuilder() {
                             <div className="text-sm text-gray-500">{ingredient.quantity} {ingredient.unit}</div>
                           )}
                         </div>
-
-                        {/* Action buttons — edit, explain (NEW 3.1), remove */}
                         {editingIndex !== index && (
                           <div className="flex items-center gap-1 ml-2">
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-blue-500" onClick={() => handleStartEdit(index)}>
                               <Pencil className="w-3.5 h-3.5" />
                             </Button>
-                            {/* AI Explain button — NEW (3.1) */}
                             <IngredientExplanationButton ingredientName={ingredient.name} size="xs" />
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-500" onClick={() => handleRemoveIngredient(index)}>
                               <Trash2 className="w-3.5 h-3.5" />
@@ -328,6 +329,14 @@ export default function IngredientBuilder() {
             </Card>
 
             <NutritionScoreDisplay data={perServingNutrition} />
+
+            {/* AI Nutrition Summary — ADDED (3.2) */}
+            <NutritionSummaryDisplay
+              data={perServingNutrition}
+              productName={recipe.name}
+              dietaryTags={detectedTagLabels}
+              allergens={detectedAllergenNames}
+            />
 
             {compareMode ? (
               <Button className="w-full gap-2" onClick={handleSaveAsProductB}>

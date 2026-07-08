@@ -1,21 +1,6 @@
 /**
- * ============================================================
- * Generator Page — Compare Mode Aware
- * ============================================================
- *
- * ADDED (2.4 fix): Detects ?mode=compare_b in URL.
- *
- * Normal mode (no query param):
- *   - "Save & Compare" button saves as Product A → /compare
- *
- * Compare mode (?mode=compare_b):
- *   - Banner shown: "You are creating Product B for comparison"
- *   - "Save as Product B & Return" button saves as Product B → /compare
- *   - All other functionality identical — zero UI changes
- *
- * PRESERVED (2.3): NutritionScoreDisplay in left column
- * PRESERVED (all): All existing functionality
- * ============================================================
+ * Generator Page — with AI Nutrition Summary (3.2)
+ * Added: NutritionSummaryDisplay below NutritionScoreDisplay in left column.
  */
 
 'use client';
@@ -27,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { NutritionForm } from '../components/nutrition-form';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
 import { saveProductA, saveProductB } from '../lib/comparison';
 import { NutritionData } from '../types/nutrition';
 import { FileSpreadsheet, FileText, Image, GitCompare, ArrowLeft } from 'lucide-react';
@@ -34,50 +20,23 @@ import { FileSpreadsheet, FileText, Image, GitCompare, ArrowLeft } from 'lucide-
 export default function Generator() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  /**
-   * compareMode — true when navigated from /compare to create Product B.
-   * Detected via ?mode=compare_b query parameter.
-   */
   const compareMode = searchParams.get('mode') === 'compare_b';
 
   const [nutritionData, setNutritionData] = useState<NutritionData | null>(null);
-  const [productName, setProductName] = useState(
-    compareMode ? 'Product B' : 'My Product'
-  );
+  const [productName, setProductName] = useState(compareMode ? 'Product B' : 'My Product');
 
   const steps = [
-    {
-      icon: FileSpreadsheet,
-      title: 'Enter Nutrition Data',
-      description: "Fill in your product's nutrition information in the form",
-    },
-    {
-      icon: FileText,
-      title: 'Choose Format',
-      description: 'Select from US FDA, EU, Indian, Canadian, or Australian formats',
-    },
-    {
-      icon: Image,
-      title: 'Download Label',
-      description: 'Get your high-resolution nutrition label ready for packaging',
-    },
+    { icon: FileSpreadsheet, title: 'Enter Nutrition Data', description: "Fill in your product's nutrition information in the form" },
+    { icon: FileText, title: 'Choose Format', description: 'Select from US FDA, EU, Indian, Canadian, or Australian formats' },
+    { icon: Image, title: 'Download Label', description: 'Get your high-resolution nutrition label ready for packaging' },
   ];
 
-  /**
-   * handleSaveAsProductA
-   * Normal mode: save as Product A and navigate to /compare.
-   */
   const handleSaveAsProductA = () => {
     if (!nutritionData) return;
     saveProductA(productName, nutritionData, 'generator');
     router.push('/compare');
   };
 
-  /**
-   * handleSaveAsProductB
-   * Compare mode: save as Product B and return to /compare.
-   */
   const handleSaveAsProductB = () => {
     if (!nutritionData) return;
     saveProductB(productName, nutritionData, 'generator');
@@ -86,50 +45,29 @@ export default function Generator() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-
-      {/*
-        ── Compare Mode Banner ──────────────────────────────────────────
-        Shown only when ?mode=compare_b is in the URL.
-        Reminds user they are creating Product B for comparison.
-      */}
       {compareMode && (
         <div className="mb-6 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-5 py-3">
           <div className="flex items-center gap-3">
             <GitCompare className="w-5 h-5 text-blue-500 flex-shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-blue-800">
-                Creating Product B for Comparison
-              </p>
-              <p className="text-xs text-blue-600">
-                Fill in the nutrition values below, then click "Save as Product B & Return".
-              </p>
+              <p className="text-sm font-semibold text-blue-800">Creating Product B for Comparison</p>
+              <p className="text-xs text-blue-600">Fill in the nutrition values below, then click "Save as Product B & Return".</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push('/compare')}
-            className="text-blue-600 hover:text-blue-800 hover:bg-blue-100 flex-shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4 mr-1.5" />
-            Back to Compare
+          <Button variant="ghost" size="sm" onClick={() => router.push('/compare')} className="text-blue-600 hover:bg-blue-100 flex-shrink-0">
+            <ArrowLeft className="w-4 h-4 mr-1.5" />Back to Compare
           </Button>
         </div>
       )}
 
       <h1 className="text-3xl font-bold mb-8">
-        {compareMode
-          ? 'Nutrition Generator — Product B'
-          : 'Ingredient Based Nutrition Label Generator'
-        }
+        {compareMode ? 'Nutrition Generator — Product B' : 'Ingredient Based Nutrition Label Generator'}
       </h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-        {/* ── Left Column ───────────────────────────────────────────────── */}
+        {/* Left column */}
         <div className="space-y-6">
-
-          {/* Product name field */}
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-1">
               Product Name {compareMode ? '(Product B)' : '(optional)'}
@@ -138,52 +76,40 @@ export default function Generator() {
               type="text"
               value={productName}
               onChange={(e) => setProductName(e.target.value || (compareMode ? 'Product B' : 'My Product'))}
-              placeholder={compareMode ? 'e.g. Whole Grain Bread' : 'e.g. My Product'}
+              placeholder="e.g. Whole Grain Bread"
               className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* Nutrition form */}
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Enter Nutrition Information</h2>
             <NutritionForm onSubmit={setNutritionData} />
           </Card>
 
-          {/* Score + action buttons — shown after label generated */}
           {nutritionData && (
             <>
               <NutritionScoreDisplay data={nutritionData} />
 
+              {/* AI Nutrition Summary — ADDED (3.2) */}
+              <NutritionSummaryDisplay
+                data={nutritionData}
+                productName={productName}
+              />
+
               {compareMode ? (
-                /*
-                  Compare mode: single action — save as Product B and return.
-                  Button is prominent since this is the primary CTA.
-                */
-                <Button
-                  className="w-full gap-2"
-                  onClick={handleSaveAsProductB}
-                >
-                  <GitCompare className="w-4 h-4" />
-                  Save as Product B & Return to Comparison
+                <Button className="w-full gap-2" onClick={handleSaveAsProductB}>
+                  <GitCompare className="w-4 h-4" />Save as Product B & Return to Comparison
                 </Button>
               ) : (
-                /*
-                  Normal mode: save as Product A for comparison.
-                */
-                <Button
-                  variant="outline"
-                  className="w-full gap-2"
-                  onClick={handleSaveAsProductA}
-                >
-                  <GitCompare className="w-4 h-4" />
-                  Save & Compare with Another Product
+                <Button variant="outline" className="w-full gap-2" onClick={handleSaveAsProductA}>
+                  <GitCompare className="w-4 h-4" />Save & Compare with Another Product
                 </Button>
               )}
             </>
           )}
         </div>
 
-        {/* ── Right Column ──────────────────────────────────────────────── */}
+        {/* Right column */}
         <div className="lg:sticky lg:top-24">
           {nutritionData ? (
             <LabelPreview nutritionData={nutritionData} />
@@ -192,11 +118,8 @@ export default function Generator() {
               <div className="space-y-8">
                 <div className="text-center">
                   <h2 className="text-xl font-semibold mb-2">Preview Of Label</h2>
-                  <p className="text-gray-500">
-                    Fill in the nutrition information to generate your label
-                  </p>
+                  <p className="text-gray-500">Fill in the nutrition information to generate your label</p>
                 </div>
-
                 <div className="relative">
                   <div className="space-y-6">
                     {steps.map((step, index) => (
@@ -216,13 +139,9 @@ export default function Generator() {
                       </div>
                     ))}
                   </div>
-
                   <div className="mt-8 grid grid-cols-3 gap-4">
                     {['US', 'EU', 'INDIA'].map((fmt) => (
-                      <div
-                        key={fmt}
-                        className="aspect-[3/4] rounded-lg bg-gray-100 p-2 flex items-center justify-center"
-                      >
+                      <div key={fmt} className="aspect-[3/4] rounded-lg bg-gray-100 p-2 flex items-center justify-center">
                         <div className="text-center">
                           <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-white shadow-sm flex items-center justify-center">
                             <FileText className="w-6 h-6 text-gray-400" />
@@ -232,7 +151,6 @@ export default function Generator() {
                       </div>
                     ))}
                   </div>
-
                   <div className="mt-8 bg-blue-50 rounded-lg p-4">
                     <h4 className="text-sm font-medium text-blue-800 mb-2">For Best Results</h4>
                     <ul className="text-sm text-blue-700 space-y-1">
