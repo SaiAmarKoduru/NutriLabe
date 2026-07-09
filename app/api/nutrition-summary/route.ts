@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
 function buildPrompt(
   productName: string,
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
         }],
         generationConfig: {
           temperature: 0.4,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
         },
       }),
     });

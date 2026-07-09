@@ -16,7 +16,7 @@ interface IngredientExplanation {
 
 // Updated to gemini-1.5-flash — current stable free-tier model as of 2025
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
 function buildPrompt(ingredientName: string): string {
   return `You are a food science expert. Explain this food ingredient for a consumer nutrition label app: "${ingredientName}"

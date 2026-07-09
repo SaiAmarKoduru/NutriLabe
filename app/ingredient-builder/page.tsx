@@ -18,11 +18,13 @@ import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingre
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
 import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
+import { RecipeSuggestionsDisplay } from '../components/recipe-suggestions-display';
 import { IngredientExplanationButton } from '../components/ingredient-explanation';
 import { saveProductA, saveProductB } from '../lib/comparison';
 import { calculateIngredientNutrition, convertToGrams } from '../lib/usda-api';
 import { detectAllergens } from '../lib/allergens';
 import { detectDietaryTags, getDetectedTags } from '../lib/dietary-tags';
+import { calculateNutritionScore } from '../lib/nutrition-score';
 import { RecipeIngredient } from '../types/recipe';
 import { NutritionData } from '../types/nutrition';
 
@@ -331,6 +333,14 @@ export default function IngredientBuilder() {
             <NutritionScoreDisplay data={perServingNutrition} />
 
             {/* AI Nutrition Summary — ADDED (3.2) */}
+            {/* AI Recipe Suggestions — ADDED (3.3) */}
+            <RecipeSuggestionsDisplay
+              data={perServingNutrition}
+              ingredients={recipe.ingredients}
+              productName={recipe.name}
+              score={calculateNutritionScore(perServingNutrition).score}
+            />
+
             <NutritionSummaryDisplay
               data={perServingNutrition}
               productName={recipe.name}
