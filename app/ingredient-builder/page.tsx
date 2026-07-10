@@ -18,6 +18,8 @@ import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingre
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
 import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
+import { NovaDisplay } from '../components/nova-display';
+import { classifyRecipeNova } from '../lib/nova-classification';
 import { RecipeSuggestionsDisplay } from '../components/recipe-suggestions-display';
 import { IngredientExplanationButton } from '../components/ingredient-explanation';
 import { saveProductA, saveProductB } from '../lib/comparison';
@@ -329,6 +331,9 @@ export default function IngredientBuilder() {
                 </div>
               </div>
             </Card>
+
+            {/* NOVA Classification — ADDED (4.1) */}
+            {(() => { const nova = classifyRecipeNova(recipe.ingredients); return nova ? <NovaDisplay result={nova} /> : null; })()}
 
             <NutritionScoreDisplay data={perServingNutrition} />
 
