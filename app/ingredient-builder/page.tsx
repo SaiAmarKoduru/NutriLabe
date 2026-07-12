@@ -17,6 +17,7 @@ import { Trash2, ArrowRight, Pencil, Check, X, GitCompare, ArrowLeft } from 'luc
 import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingredient-search';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { NutrientDensityDisplay } from '../components/nutrient-density-display';
 import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
 import { NovaDisplay } from '../components/nova-display';
 import { classifyRecipeNova } from '../lib/nova-classification';
@@ -338,6 +339,9 @@ export default function IngredientBuilder() {
             <NutritionScoreDisplay data={perServingNutrition} />
 
             {/* AI Nutrition Summary — ADDED (3.2) */}
+            {/* NDS — ADDED (4.2) */}
+            <NutrientDensityDisplay data={perServingNutrition} />
+
             {/* AI Recipe Suggestions — ADDED (3.3) */}
             <RecipeSuggestionsDisplay
               data={perServingNutrition}
