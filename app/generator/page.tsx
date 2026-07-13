@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { NutritionForm } from '../components/nutrition-form';
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
+import { NutrientDensityDisplay } from '../components/nutrient-density-display';
 import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
 import { saveProductA, saveProductB } from '../lib/comparison';
 import { NutritionData } from '../types/nutrition';
@@ -89,6 +90,9 @@ export default function Generator() {
           {nutritionData && (
             <>
               <NutritionScoreDisplay data={nutritionData} />
+
+              {/* NDS — ADDED (4.2) */}
+              <NutrientDensityDisplay data={nutritionData} />
 
               {/* AI Nutrition Summary — ADDED (3.2) */}
               <NutritionSummaryDisplay
