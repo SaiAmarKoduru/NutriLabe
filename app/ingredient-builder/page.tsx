@@ -18,6 +18,8 @@ import { USDAIngredientSearch } from '../components/ingredient-search/usda-ingre
 import LabelPreview from '../components/nutrition-label/label-preview';
 import { NutritionScoreDisplay } from '../components/nutrition-score-display';
 import { NutrientDensityDisplay } from '../components/nutrient-density-display';
+import { AdditiveRiskDisplay } from '../components/additive-display';
+import { detectAdditives } from '../lib/additives';
 import { NutritionSummaryDisplay } from '../components/nutrition-summary-display';
 import { NovaDisplay } from '../components/nova-display';
 import { classifyRecipeNova } from '../lib/nova-classification';
@@ -91,6 +93,11 @@ export default function IngredientBuilder() {
     () => detectAllergens(recipe.ingredients).map((r) => r.allergen.name),
     [recipe.ingredients]
   );
+  const additiveResult = useMemo(
+    () => detectAdditives(recipe.ingredients),
+    [recipe.ingredients]
+  );
+
   const detectedTagLabels = useMemo(
     () => getDetectedTags(detectDietaryTags(recipe.ingredients)).map((t) => t.label),
     [recipe.ingredients]
@@ -341,6 +348,9 @@ export default function IngredientBuilder() {
             {/* AI Nutrition Summary — ADDED (3.2) */}
             {/* NDS — ADDED (4.2) */}
             <NutrientDensityDisplay data={perServingNutrition} />
+
+            {/* Additive Risk — ADDED (4.3) */}
+            <AdditiveRiskDisplay result={additiveResult} hasIngredients={recipe.ingredients.length > 0} />
 
             {/* AI Recipe Suggestions — ADDED (3.3) */}
             <RecipeSuggestionsDisplay
